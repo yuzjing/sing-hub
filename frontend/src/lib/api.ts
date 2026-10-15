@@ -1,116 +1,157 @@
-// frontend/src/lib/api.ts
-import type { Component, Profile, Device, CommitRecord, NodePingReport } from './types';
+import type { Profile, Component, Device, CommitRecord, NodePingReport } from './types';
 
-async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  });
+// API 请求的基础辅助函数
+async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(endpoint, options);
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `请求失败: ${res.status}`);
+    let errText = await res.text();
+    try {
+      const parsed = JSON.parse(errText);
+      if (parsed.error) errText = parsed.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(errText || `HTTP Request Failed: ${res.status}`);
   }
   return res.json();
 }
 
 export const api = {
-  getComponents: () => req<Component[]>('/api/components'),
-  saveComponent: (c: Component) => req<{ status: string }>('/api/components', {
-    method: 'POST',
-    body: JSON.stringify(c),
-  }),
-  deleteComponent: (id: string) => req<{ status: string }>(`/api/components/${id}`, {
-    method: 'DELETE',
-  }),
-  batchDeleteComponents: (ids: string[]) => req<{ status: string }>('/api/components/batch-delete', {
-    method: 'POST',
-    body: JSON.stringify({ ids }),
-  }),
+  // ================= 方案 (Profiles) =================
+  getProfiles: () => fetchAPI<Profile[]>('/api/profiles'),
   
-  // 【关键修复】：这里必须带上 node_id: string = ''
-  previewComponent: async (payload_tmpl: string, params_json: string, node_id: string = ''): Promise<string> => {
+  getProfile: (id: string) => fetchAPI<Profile>(`/api/profiles/${id}`),
+  
+  saveProfile: (p: Profile) => 
+    fetchAPI<{ status: string }>('/api/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(p),
+    }),
+    
+  deleteProfile: (id: string) => 
+    fetchAPI<{ status: string }>(`/api/profiles/${id}`, { method: 'DELETE' }),
+
+  batchDeleteProfiles: (ids: string[]) =>
+    fetchAPI<{ status: string }>('/api/profiles/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    }),
+
+  compileProfile: async (id: string): Promise<{ json: string; commitHash: string }> => {
+    const res = await fetch(`/api/profiles/${id}/compile`);
+    if (!res.ok) throw new Error(await res.text());
+    const jsonStr = await res.text();
+    return {
+      json: jsonStr,
+      commitHash: res.headers.get('X-Commit-Hash') || '',
+    };
+  },
+
+  // ================= 组件 (Components) =================
+  getComponents: () => fetchAPI<Component[]>('/api/components'),
+
+  saveComponent: (c: Component) =>
+    fetchAPI<{ status: string }>('/api/components', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(c),
+    }),
+
+  deleteComponent: (id: string) =>
+    fetchAPI<{ status: string }>(`/api/components/${id}`, { method: 'DELETE' }),
+
+  batchDeleteComponents: (ids: string[]) =>
+    fetchAPI<{ status: string }>('/api/components/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    }),
+
+  previewComponent: async (payload_tmpl: string, params_json: string, node_id: string): Promise<string> => {
     const res = await fetch('/api/components/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ payload_tmpl, params_json, node_id }),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: '渲染失败' }));
-      throw new Error(err.error);
-    }
-    return res.text();
+    if (!res.ok) throw new Error(await res.text());
+    return res.text(); // 预览接口直接返回格式化后的 JSON 字符串
   },
 
-  getProfiles: () => req<Profile[]>('/api/profiles'),
-  getProfile: (id: string) => req<Profile>(`/api/profiles/${id}`),
-  saveProfile: (p: Profile) => req<{ status: string }>('/api/profiles', {
-    method: 'POST',
-    body: JSON.stringify(p),
-  }),
-  deleteProfile: (id: string) => req<{ status: string }>(`/api/profiles/${id}`, {
-    method: 'DELETE',
-  }),
-  batchDeleteProfiles: (ids: string[]) => req<{ status: string }>('/api/profiles/batch-delete', {
-    method: 'POST',
-    body: JSON.stringify({ ids }),
-  }),
-  compileProfile: async (id: string): Promise<{ json: string; commitHash: string }> => {
-    const res = await fetch(`/api/profiles/${id}/compile`);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: '编译失败' }));
-      throw new Error(err.error);
-    }
-    const commitHash = res.headers.get('X-Commit-Hash') || '';
-    const json = await res.text();
-    return { json, commitHash };
-  },
+  // ================= 节点 (Devices) =================
+  getDevices: () => fetchAPI<Device[]>('/api/devices'),
 
-  getHistory: (profileId: string) => req<CommitRecord[]>(`/api/profiles/${profileId}/history`),
-  getDiff: (profileId: string, commit: string) => req<{ diff: string }>(`/api/profiles/${profileId}/diff?commit=${commit}`),
-  rollback: async (profileId: string, commit: string): Promise<string> => {
-    const res = await fetch(`/api/profiles/${profileId}/rollback?commit=${commit}`, { method: 'POST' });
-    if (!res.ok) throw new Error('回滚失败');
-    return res.text();
-  },
-
-  getDevices: () => req<Device[]>('/api/devices'),
-  saveDevice: (d: Device) => req<{ status: string }>('/api/devices', {
-    method: 'POST',
-    body: JSON.stringify(d),
-  }),
-  deleteDevice: (id: string) => req<{ status: string }>(`/api/devices/${id}`, {
-    method: 'DELETE',
-  }),
-  batchDeleteDevices: (ids: string[]) => req<{ status: string }>('/api/devices/batch-delete', {
-    method: 'POST',
-    body: JSON.stringify({ ids }),
-  }),
-  pingDevice: (id: string) => req<{ online: boolean; latency_ms: number; error?: string }>(`/api/devices/${id}/ping`, { method: 'POST' }),
-  pingAllDevices: () => req<NodePingReport[]>('/api/devices/ping-all', { method: 'POST' }),
-  deployDevice: (id: string) => req<{ status: string; verified_hash: string }>(`/api/devices/${id}/deploy`, { method: 'POST' }),
-
-  sqlBackupDownloadUrl: '/api/system/backup/sql',
-  restoreSql: async (sqlText: string) => {
-    const res = await fetch('/api/system/restore/sql', {
+  saveDevice: (d: Device) =>
+    fetchAPI<{ status: string }>('/api/devices', {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      body: sqlText,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: '恢复失败' }));
-      throw new Error(err.error);
-    }
-    return res.json();
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(d),
+    }),
+
+  deleteDevice: (id: string) =>
+    fetchAPI<{ status: string }>(`/api/devices/${id}`, { method: 'DELETE' }),
+
+  batchDeleteDevices: (ids: string[]) =>
+    fetchAPI<{ status: string }>('/api/devices/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    }),
+
+  pingDevice: (id: string) =>
+    fetchAPI<{ online: boolean; latency_ms: number; error?: string }>(`/api/devices/${id}/ping`, { method: 'POST' }),
+
+  pingAllDevices: () =>
+    fetchAPI<NodePingReport[]>('/api/devices/ping-all', { method: 'POST' }),
+
+  deployDevice: (id: string) =>
+    fetchAPI<{ status: string; verified_hash: string }>(`/api/devices/${id}/deploy`, { method: 'POST' }),
+
+  // ================= 历史与版本 (Git) =================
+  getHistory: (profileId: string) => fetchAPI<CommitRecord[]>(`/api/profiles/${profileId}/history`),
+
+  getDiff: (profileId: string, commitHash: string) =>
+    fetchAPI<{ diff: string }>(`/api/profiles/${profileId}/diff?commit=${commitHash}`),
+
+  rollback: async (profileId: string, commitHash: string): Promise<string> => {
+    const res = await fetch(`/api/profiles/${profileId}/rollback?commit=${commitHash}`, { method: 'POST' });
+    if (!res.ok) throw new Error(await res.text());
+    return res.text();
   },
 
-  getSettings: () => req<Record<string, string>>('/api/system/settings'),
-  saveSettings: (settings: Record<string, string>) => req<{ status: string }>('/api/system/settings', {
-    method: 'POST',
-    body: JSON.stringify(settings),
-  }),
-  getLogLevel: () => req<{ level: string }>('/api/system/log-level'),
-  setLogLevel: (level: string) => req<{ status: string }>('/api/system/log-level', {
-    method: 'POST',
-    body: JSON.stringify({ level }),
-  }),
+  // ================= 系统与运维 (System) =================
+  getLogLevel: () => fetchAPI<{ level: string }>('/api/system/log-level'),
+  
+  setLogLevel: (level: string) =>
+    fetchAPI<{ status: string }>('/api/system/log-level', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level }),
+    }),
+
+  getSettings: () => fetchAPI<Record<string, string>>('/api/system/settings'),
+
+  saveSettings: (settings: Record<string, string>) =>
+    fetchAPI<{ status: string }>('/api/system/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }),
+
+  // 获取服务端物理备份列表
+  listServerBackups: () => 
+    fetchAPI<{ file_name: string; path: string; size_bytes: number; created_at: string }[]>('/api/system/backups'),
+
+  // 触发服务端生成快照
+  createServerBackup: () => 
+    fetchAPI<{ file_name: string; path: string; commit_hash: string }>('/api/system/backup/create', { method: 'POST' }),
+
+  // 通过绝对路径热恢复
+  restoreFromServerPath: (path: string) =>
+    fetchAPI<{ status: string; path: string }>('/api/system/restore/path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }),
 };
