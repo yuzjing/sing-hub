@@ -120,6 +120,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/system/settings", s.handleGetSettings)
 	s.mux.HandleFunc("POST /api/system/settings", s.handleSaveSettings)
 
+	// 成品模块 Modules CRUD 与批量删除
+	s.mux.HandleFunc("GET /api/modules", s.handleListModules)
+	s.mux.HandleFunc("POST /api/modules", s.handleSaveModule)
+	s.mux.HandleFunc("DELETE /api/modules/{id}", s.handleDeleteModule)
+	s.mux.HandleFunc("POST /api/modules/batch-delete", s.handleBatchDeleteModules)
+
 	s.RegisterStatic()
 }
 
@@ -178,7 +184,7 @@ func (s *Server) handlePreviewComponent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	preview, err := s.assembler.PreviewComponent(r.Context(), req.PayloadTmpl, req.ParamsJSON, req.NodeID)
+	preview, err := s.assembler.PreviewComponent(r.Context(), req.PayloadTmpl, req.ParamsJSON)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -596,4 +602,48 @@ func readJSON(r *http.Request, target any) error {
 	}
 	defer r.Body.Close()
 	return json.NewDecoder(io.LimitReader(r.Body, 10*1024*1024)).Decode(target)
+}
+
+func (s *Server) handleListModules(w http.ResponseWriter, r *http.Request) {
+	list, err := s.store.ListModules(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) handleSaveModule(w http.ResponseWriter, r *http.Request) {
+	var m model.Module
+	if err := readJSON(r, &m); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.store.SaveModule(r.Context(), m); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleDeleteModule(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.store.DeleteModule(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleBatchDeleteModules(w http.ResponseWriter, r *http.Request) {
+	var req model.BatchDeleteReq
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.store.BatchDeleteModules(r.Context(), req.IDs); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

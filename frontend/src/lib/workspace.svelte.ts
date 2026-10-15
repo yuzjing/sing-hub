@@ -1,13 +1,14 @@
 // frontend/src/lib/workspace.svelte.ts
 import { api } from './api';
-import type { Profile, Component, Device, ProfileComponentBinding, CommitRecord, NodePingReport } from './types';
+import type { Profile, Component, Module, Device, ProfileModuleBinding, CommitRecord, NodePingReport } from './types';
 
 export class WorkspaceState {
   profiles = $state<Profile[]>([]);
-  components = $state<Component[]>([]);
+  modules = $state<Module[]>([]);       // 第 2 层成品积木
+  components = $state<Component[]>([]); // 第 1 层母版
   devices = $state<Device[]>([]);
 
-  currentWorkspace = $state<'library' | 'studio' | 'fleet'>('studio');
+  currentWorkspace = $state<'studio' | 'modules' | 'foundry' | 'fleet'>('studio');
   showSettingsDrawer = $state(false);
   isSidebarExpanded = $state(false);
 
@@ -43,28 +44,31 @@ export class WorkspaceState {
     return this.profiles.find((p: Profile) => p.id === this.activeProfileId) || null;
   });
 
-  resolvedBindings = $derived.by(() => {
+  // 大盘流水线：解析方案引用的所有成品积木，并关联其母版的最新元数据
+  resolvedModuleBindings = $derived.by(() => {
     if (!this.activeProfile) return [];
+    const modMap = Object.fromEntries(this.modules.map((m: Module) => [m.id, m]));
     const compMap = Object.fromEntries(this.components.map((c: Component) => [c.id, c]));
-    return (this.activeProfile.components || []).map((b: ProfileComponentBinding) => {
-      const realComp = compMap[b.component_id];
+
+    return (this.activeProfile.modules || []).map((b: ProfileModuleBinding) => {
+      const mod = modMap[b.module_id];
+      const tmpl = mod ? compMap[mod.template_id] : null;
       return {
         binding: b,
-        component: realComp || {
-          id: b.component_id,
-          name: `积木 [${b.component_id}]`,
+        module: mod || {
+          id: b.module_id,
+          name: `模块 [${b.module_id}]`,
+          template_id: '',
           category: 'io',
-          scope_tag: 'universal',
-          mount_path: 'inbounds',
-          strategy: 'append',
-          payload_tmpl: '{}',
+          params_json: '{}',
           description: '',
         },
+        template: tmpl || null,
       };
     });
   });
 
-  switchWorkspace(wsName: 'library' | 'studio' | 'fleet') {
+  switchWorkspace(wsName: 'studio' | 'modules' | 'foundry' | 'fleet') {
     this.currentWorkspace = wsName;
     this.showSettingsDrawer = false;
     this.showTimeline = false;
@@ -110,6 +114,7 @@ export class WorkspaceState {
     this.initTheme();
     await Promise.all([
       this.loadProfiles(),
+      this.loadModules(),
       this.loadComponents(),
       this.loadDevices(),
       this.loadSettings(),
@@ -151,6 +156,10 @@ export class WorkspaceState {
 
   async loadProfiles() {
     this.profiles = await api.getProfiles();
+  }
+
+  async loadModules() {
+    this.modules = await api.getModules();
   }
 
   async loadComponents() {
@@ -283,9 +292,10 @@ export class WorkspaceState {
     await this.loadProfiles();
   }
 
-  async moveBinding(index: number, direction: 'up' | 'down') {
+  // 大盘模块排序调整
+  async moveModuleBinding(index: number, direction: 'up' | 'down') {
     if (!this.activeProfile) return;
-    const bindings = [...this.activeProfile.components];
+    const bindings = [...this.activeProfile.modules];
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= bindings.length) return;
 
@@ -293,89 +303,60 @@ export class WorkspaceState {
     bindings[index] = bindings[targetIndex];
     bindings[targetIndex] = temp;
 
-    bindings.forEach((b: ProfileComponentBinding, idx: number) => {
+    bindings.forEach((b: ProfileModuleBinding, idx: number) => {
       b.order_index = idx + 1;
     });
 
-    this.activeProfile.components = bindings;
+    this.activeProfile.modules = bindings;
     await api.saveProfile(this.activeProfile);
     this.triggerCompile();
   }
 
-  async attachComponents(componentIds: string[]) {
+  // 挂载成品模块（天然支持多次挂载不同实例）
+  async attachModules(moduleIds: string[]) {
     if (!this.activeProfile) return;
-    const existingIds = (this.activeProfile.components || []).map(b => b.component_id);
-    const toAdd = componentIds.filter(id => !existingIds.includes(id));
-    if (toAdd.length === 0) return;
-
-    let maxOrder = (this.activeProfile.components || []).reduce(
+    let maxOrder = (this.activeProfile.modules || []).reduce(
       (max: number, b) => Math.max(max, b.order_index),
       0
     );
 
-    const newBindings = [...(this.activeProfile.components || [])];
-    for (const id of toAdd) {
+    const newBindings = [...(this.activeProfile.modules || [])];
+    for (const id of moduleIds) {
       maxOrder++;
       newBindings.push({
-        component_id: id,
+        id: `bind-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        module_id: id,
         order_index: maxOrder,
-        params_json: '{}',
       });
     }
 
-    this.activeProfile.components = newBindings;
+    this.activeProfile.modules = newBindings;
     await api.saveProfile(this.activeProfile);
-
     await this.loadProfiles();
-    const currentId = this.activeProfileId;
-    this.activeProfileId = '';
-    queueMicrotask(() => {
-      this.activeProfileId = currentId;
-      this.triggerCompile();
-    });
+    this.triggerCompile();
   }
 
-  async detachComponent(componentId: string) {
+  // 卸载方案中的某个挂载实例
+  async detachModule(bindingId: string) {
     if (!this.activeProfile) return;
-    this.activeProfile.components = this.activeProfile.components.filter(
-      (b: ProfileComponentBinding) => b.component_id !== componentId
+    this.activeProfile.modules = this.activeProfile.modules.filter(
+      (b: ProfileModuleBinding) => (b.id ? b.id !== bindingId : b.module_id !== bindingId)
     );
     await api.saveProfile(this.activeProfile);
-
     await this.loadProfiles();
-    const currentId = this.activeProfileId;
-    this.activeProfileId = '';
-    queueMicrotask(() => {
-      this.activeProfileId = currentId;
-      this.triggerCompile();
-    });
-  }
-
-  async updateBindingSingleParam(componentId: string, paramKey: string, paramVal: string | number | boolean) {
-    if (!this.activeProfile) return;
-    const item = this.activeProfile.components.find((b: ProfileComponentBinding) => b.component_id === componentId);
-    if (!item) return;
-
-    let currentObj: Record<string, string | number | boolean> = {};
-    try {
-      const parsed = JSON.parse(item.params_json || '{}');
-      if (typeof parsed === 'object' && parsed !== null) {
-        currentObj = parsed;
-      }
-    } catch (e) {
-      console.debug('Failed to parse existing params_json', e);
-    }
-
-    currentObj[paramKey] = paramVal;
-    item.params_json = JSON.stringify(currentObj);
-
-    await api.saveProfile(this.activeProfile);
     this.triggerCompile();
   }
 
   async batchDeleteComponents(ids: string[]) {
     await api.batchDeleteComponents(ids);
     await this.loadComponents();
+    if (this.activeProfileId) this.triggerCompile();
+  }
+
+  async batchDeleteModules(ids: string[]) {
+    await api.batchDeleteModules(ids);
+    await this.loadModules();
+    await this.loadProfiles();
     if (this.activeProfileId) this.triggerCompile();
   }
 

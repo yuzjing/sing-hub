@@ -13,10 +13,22 @@ export interface Component {
   updated_at?: string;
 }
 
-export interface ProfileComponentBinding {
-  component_id: string;
-  order_index: number;
+export interface Module {
+  id: string;
+  template_id: string;
+  name: string;
+  category: string;
   params_json: string;
+  description: string;
+  updated_at?: string;
+  template?: Component;
+}
+
+export interface ProfileModuleBinding {
+  id?: string;
+  profile_id?: string;
+  module_id: string;
+  order_index: number;
 }
 
 export interface ProfileCapabilities {
@@ -30,9 +42,9 @@ export interface Profile {
   name: string;
   token: string;
   description: string;
-  sing_box_version: string; // 适配内核版本，如 1.11.0
+  sing_box_version: string;
   capabilities: ProfileCapabilities;
-  components: ProfileComponentBinding[];
+  modules: ProfileModuleBinding[];
   updated_at?: string;
 }
 
@@ -42,7 +54,7 @@ export interface Device {
   endpoints: string[];
   ssh_host: string;
   target_profile_id: string;
-  auth_type: 'key_path' | 'key_content' | 'password';
+  auth_type: string;
   auth_secret: string;
   key_path: string;
   ssh_user: string;
@@ -64,7 +76,6 @@ export interface CommitRecord {
 
 export interface NodePingReport {
   device_id: string;
-  endpoint: string;
   online: boolean;
   latency_ms: number;
   error?: string;

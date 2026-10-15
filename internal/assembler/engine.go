@@ -40,56 +40,14 @@ func funcMap() template.FuncMap {
 	}
 }
 
-// PreviewComponent 工坊沙箱预览：直接挂钩真实节点真实数据，确保 100% 渲染出合法 JSON
-func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSON string, nodeID string) (string, error) {
+// PreviewComponent 纯语法模板渲染预览
+func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSON string) (string, error) {
 	var params map[string]any
 	if strings.TrimSpace(paramsJSON) == "" {
 		params = make(map[string]any)
 	} else {
 		if err := json.Unmarshal([]byte(paramsJSON), &params); err != nil {
 			params = make(map[string]any)
-		}
-	}
-
-	// 1. 注入真实节点的物理数据
-	var nodeCtx map[string]any
-	if nodeID != "" {
-		devices, _ := e.store.ListDevices(ctx)
-		for _, d := range devices {
-			if d.ID == nodeID {
-				primaryEP := ""
-				if len(d.Endpoints) > 0 {
-					primaryEP = d.Endpoints[0]
-				}
-				nodeCtx = map[string]any{
-					"id":       d.ID,
-					"name":     d.Name,
-					"endpoint": primaryEP,
-					"ssh_host": d.SSHHost,
-					"tags":     d.Tags,
-				}
-				break
-			}
-		}
-	}
-
-	if nodeCtx == nil {
-		nodeCtx = map[string]any{
-			"id":       "node-preview",
-			"name":     "测试节点",
-			"endpoint": "127.0.0.1",
-			"ssh_host": "127.0.0.1",
-			"tags":     []string{"preview"},
-		}
-	}
-	params["_node"] = nodeCtx
-
-	if _, exists := params["_profile"]; !exists {
-		params["_profile"] = map[string]any{
-			"id":      "preview-profile",
-			"name":    "预览测试方案",
-			"token":   "tok_test_sample",
-			"version": "1.11.0",
 		}
 	}
 
@@ -112,19 +70,20 @@ func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSO
 	return string(pretty), nil
 }
 
-// Assemble 编译方案
+// Assemble 编译方案：大盘将所有挂载的成品积木按照顺序动态组装进最终完整的 config.json
 func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string, error) {
 	start := time.Now()
-	slog.Info("compiling profile", "profile_id", profileID)
+	slog.Info("assembling profile from modules", "profile_id", profileID)
 
 	profile, err := e.store.GetProfile(ctx, profileID)
 	if err != nil {
 		return nil, "", fmt.Errorf("get profile failed: %w", err)
 	}
 
-	bindings, err := e.store.GetResolvedProfileBindings(ctx, profileID)
+	// 取出该方案的所有成品积木解析项 (包含软链接对应的最新母版)
+	resolvedModules, err := e.store.GetResolvedProfileModules(ctx, profileID)
 	if err != nil {
-		return nil, "", fmt.Errorf("load bindings failed: %w", err)
+		return nil, "", fmt.Errorf("load resolved modules failed: %w", err)
 	}
 
 	var associatedDevice *model.Device
@@ -138,12 +97,12 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 
 	root := make(map[string]any)
 
-	for _, b := range bindings {
+	for _, item := range resolvedModules {
 		var params map[string]any
-		if strings.TrimSpace(b.ParamsJSON) == "" {
+		if strings.TrimSpace(item.Module.ParamsJSON) == "" {
 			params = make(map[string]any)
 		} else {
-			_ = json.Unmarshal([]byte(b.ParamsJSON), &params)
+			_ = json.Unmarshal([]byte(item.Module.ParamsJSON), &params)
 		}
 
 		params["_profile"] = map[string]any{
@@ -175,23 +134,25 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 			}
 		}
 
-		tmpl, err := template.New(b.Component.ID).Funcs(funcMap()).Parse(b.Component.PayloadTmpl)
+		// 保证执行的是最新母版模板 (item.Template 是指针最新查出的)
+		tmpl, err := template.New(item.Module.ID).Funcs(funcMap()).Parse(item.Template.PayloadTmpl)
 		if err != nil {
-			return nil, "", fmt.Errorf("component [%s] template syntax error: %w", b.Component.Name, err)
+			return nil, "", fmt.Errorf("module [%s] template syntax error: %w", item.Module.Name, err)
 		}
 
 		var rendered bytes.Buffer
 		if err := tmpl.Execute(&rendered, params); err != nil {
-			return nil, "", fmt.Errorf("component [%s] render error: %w", b.Component.Name, err)
+			return nil, "", fmt.Errorf("module [%s] render error: %w", item.Module.Name, err)
 		}
 
 		var chunk any
 		if err := json.Unmarshal(rendered.Bytes(), &chunk); err != nil {
-			return nil, "", fmt.Errorf("component [%s] rendered invalid json: %w\n%s", b.Component.Name, err, rendered.String())
+			return nil, "", fmt.Errorf("module [%s] rendered invalid json: %w\n%s", item.Module.Name, err, rendered.String())
 		}
 
-		if err := mount(root, b.Component.MountPath, b.Component.Strategy, chunk); err != nil {
-			return nil, "", fmt.Errorf("mount component [%s] failed: %w", b.Component.Name, err)
+		// 挂载到根配置树 (MountPath 支持点分路径，如 "dns.servers")
+		if err := mount(root, item.Template.MountPath, item.Template.Strategy, chunk); err != nil {
+			return nil, "", fmt.Errorf("mount module [%s] failed: %w", item.Module.Name, err)
 		}
 	}
 
@@ -206,7 +167,7 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 		commitHash, _ = e.gitRepo.CommitSnapshot(profileID, finalJSON, sqlDump)
 	}
 
-	slog.Info("profile compilation finished",
+	slog.Info("profile assembly finished",
 		"profile_id", profileID,
 		"duration_ms", time.Since(start).Milliseconds(),
 		"size_bytes", len(finalJSON),

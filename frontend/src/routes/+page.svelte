@@ -3,7 +3,7 @@
   import { onMount, untrack } from 'svelte';
   import { ws } from '$lib/workspace.svelte';
   import { api } from '$lib/api';
-  import type { Component, Profile, Device } from '$lib/types';
+  import type { Component, Module, Profile, Device } from '$lib/types';
   import CodeEditor from '$lib/components/CodeEditor.svelte';
   import Icon from '$lib/components/Icon.svelte';
 
@@ -11,6 +11,7 @@
   import MountDrawer from '$lib/components/MountDrawer.svelte';
   import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
   import ComponentModal from '$lib/components/ComponentModal.svelte';
+  import ModuleModal from '$lib/components/ModuleModal.svelte';
   import DeviceModal from '$lib/components/DeviceModal.svelte';
   import ProfileModal from '$lib/components/ProfileModal.svelte';
 
@@ -20,20 +21,27 @@
 
   let showMountDrawer = $state(false);
 
-  // 方案配方管理模式
+  // 方案配方 (PROFILES) 管理模式
   let isProfileManageMode = $state(false);
   let selectedProfileIds = $state<string[]>([]);
   let editingProfile = $state<Profile | null>(null);
 
-  // 积木工坊管理模式
+  // 成品积木 (MODULES) 管理模式
+  let isModuleManageMode = $state(false);
+  let selectedModuleIds = $state<string[]>([]);
+  let editingModule = $state<Module | null>(null);
+  let showModuleModal = $state(false);
+
+  // 语法母版 (FOUNDRY) 管理模式
   let isCompManageMode = $state(false);
   let selectedCompIds = $state<string[]>([]);
-  let editingComponent = $state<Component | null>(null);
+  let showNewCompModal = $state(false);
 
-  // 节点管理模式
+  // 节点运维 (FLEET) 管理模式
   let editingDevice = $state<Device | null>(null);
   let isDeviceManageMode = $state(false);
   let selectedDeviceIds = $state<string[]>([]);
+  let showDeviceModal = $state(false);
 
   let confirmState = $state({
     open: false,
@@ -44,12 +52,11 @@
   });
 
   let showProfileModal = $state(false);
-  let showNewCompModal = $state(false);
-  let showDeviceModal = $state(false);
 
+  // 工坊沙箱编辑器状态
   let studioActiveCompId = $state<string>('');
   let studioTmplCode = $state<string>('');
-  let studioPreviewJSON = $state<string>('// 选择积木查看实时语法渲染');
+  let studioPreviewJSON = $state<string>('// 选择积木母版查看实时语法渲染');
   let studioPreviewError = $state<string>('');
   let showContextVarMenu = $state(false);
 
@@ -57,7 +64,6 @@
 
   let isTagDropdownOpen = $state(false);
   let selectedFilterTags = $state<string[]>([]);
-  let expandedBindingCompId = $state<string | null>(null);
 
   let availableTags = $derived.by(() => {
     const tags: string[] = [];
@@ -71,7 +77,6 @@
     return tags;
   });
 
-  // 提取模板中所有插孔变量
   function extractAllTemplateVars(code: string): string[] {
     const matches = code.matchAll(/\{\{\s*\.([a-zA-Z0-9_.]+)(?:\s*\|[^}]+)?\s*\}\}/g);
     const uniqueVars: string[] = [];
@@ -92,39 +97,6 @@
       return {};
     }
   }
-
-  // 指针式双重绑定解析：组件永远动态读取 ws.components 中的最新母版（软链接）
-  let currentBindings = $derived.by(() => {
-    if (!ws.activeProfile) return [];
-
-    const rawList = (ws.activeProfile.components || []) as Array<Record<string, unknown> | string>;
-    return rawList.map((item, idx) => {
-      const targetId = typeof item === 'string'
-        ? item
-        : (item.component_id || item.id || (item.component as Record<string, unknown>)?.id);
-
-      // 永远从全局母版库动态指针关联最新组件对象
-      const foundComp = ws.components.find((c: Component) => String(c.id) === String(targetId)) || {
-        id: String(targetId || `comp-${idx}`),
-        name: (item as Record<string, unknown>)?.name || `积木 #${targetId || idx + 1}`,
-        category: 'io',
-        mount_path: (item as Record<string, unknown>)?.mount_path || 'inbounds',
-        scope_tag: 'universal',
-        strategy: 'append',
-        payload_tmpl: '{}',
-        description: ''
-      };
-
-      const bindingObj = typeof item === 'object' && item !== null
-        ? item
-        : { component_id: String(targetId), params_json: '{}' };
-
-      return {
-        binding: bindingObj as { component_id: string; params_json?: string },
-        component: foundComp as Component // 这里的 component 始终是最新的
-      };
-    });
-  });
 
   let studioDetectedVars = $derived.by(() => {
     return extractAllTemplateVars(studioTmplCode);
@@ -232,14 +204,13 @@
     runStudioPreview();
   }
 
-  // 保存母版：保存后同时刷新大盘并触发编译，实现软链接即时同步
   async function saveStudioComp() {
     const c = ws.components.find((item: Component) => item.id === studioActiveCompId);
     if (!c) return;
     c.payload_tmpl = studioTmplCode;
     await api.saveComponent(c);
-    await ws.loadComponents(); // 重新加载组件库
-    await ws.loadProfiles();   // 同步拉取方案保证指针最新
+    await ws.loadComponents();
+    await ws.loadProfiles();
     ws.showToast('母版已保存并提交 Git ✓', 'success');
     if (ws.activeProfileId) ws.triggerCompile();
   }
@@ -252,7 +223,7 @@
         enable_ping: data.enable_ping,
         enable_push: data.enable_push,
       },
-      components: editingProfile ? editingProfile.components : [],
+      modules: editingProfile ? editingProfile.modules : [],
     };
     await api.saveProfile(p);
     await ws.loadProfiles();
@@ -269,13 +240,14 @@
       name: `${source.name} (副本)`,
       token: crypto.randomUUID().replace(/-/g, '').slice(0, 16),
       sing_box_version: source.sing_box_version,
+      modules: source.modules || [],
     };
     showProfileModal = true;
   }
 
-  async function handleSaveComponent(comp: { id?: string; name: string; category: string; scope_tag: string; mount_path: string; strategy: 'append'|'merge'; payload_tmpl: string }) {
+  async function handleCreateComponent(comp: { name: string; category: string; scope_tag: string; mount_path: string; strategy: 'append'|'merge'; payload_tmpl: string }) {
     const c: Component = {
-      id: comp.id || ('comp-' + Date.now().toString(36)),
+      id: 'comp-' + Date.now().toString(36),
       name: comp.name,
       category: comp.category,
       scope_tag: comp.scope_tag,
@@ -288,8 +260,17 @@
     await ws.loadComponents();
     selectStudioComp(c);
     showNewCompModal = false;
-    editingComponent = null;
-    ws.showToast('母版已保存 ✓', 'success');
+    ws.showToast('母版已入库 ✓', 'success');
+  }
+
+  async function handleSaveModule(mod: Module) {
+    await api.saveModule(mod);
+    await ws.loadModules();
+    await ws.loadProfiles();
+    showModuleModal = false;
+    editingModule = null;
+    ws.showToast('成品积木已保存 ✓', 'success');
+    if (ws.activeProfileId) ws.triggerCompile();
   }
 
   async function handleSaveDevice(d: Device) {
@@ -378,14 +359,22 @@
         </button>
 
         <button
+          onclick={() => ws.switchWorkspace('modules')}
+          class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'modules' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
+        >
+          <Icon name="boxes" color={ws.currentWorkspace === 'modules' ? 'blue' : 'default'} size={17} />
+          {#if ws.isSidebarExpanded}<span>成品积木库</span>{/if}
+        </button>
+
+        <button
           onclick={() => {
-            ws.switchWorkspace('library');
+            ws.switchWorkspace('foundry');
             if (ws.components.length > 0 && !studioActiveCompId) selectStudioComp(ws.components[0]);
           }}
-          class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'library' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
+          class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'foundry' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
         >
-          <Icon name="boxes" color={ws.currentWorkspace === 'library' ? 'emerald' : 'default'} size={17} />
-          {#if ws.isSidebarExpanded}<span>资产工坊</span>{/if}
+          <Icon name="sliders" color={ws.currentWorkspace === 'foundry' ? 'emerald' : 'default'} size={17} />
+          {#if ws.isSidebarExpanded}<span>语法母版工坊</span>{/if}
         </button>
 
         <button
@@ -410,19 +399,26 @@
   </aside>
 
   <div class="flex flex-1 min-w-0 flex-col overflow-hidden">
+    <!-- 顶部状态栏 -->
     <header class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white/90 px-6 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/90 z-10">
       <div class="flex items-center gap-3">
         {#if ws.currentWorkspace === 'studio'}
           <Icon name="layers" color="amber" size={20} />
           <div>
             <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">方案装配大盘 (Studio)</h1>
-            <span class="text-[10px] text-zinc-400">编排积木流水线，输出最终合规全局配置</span>
+            <span class="text-[10px] text-zinc-400">编排成品积木流水线，输出最终合规全局配置</span>
           </div>
-        {:else if ws.currentWorkspace === 'library'}
-          <Icon name="boxes" color="emerald" size={20} />
+        {:else if ws.currentWorkspace === 'modules'}
+          <Icon name="boxes" color="blue" size={20} />
           <div>
-            <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">原子资产工坊 (Foundry)</h1>
-            <span class="text-[10px] text-zinc-400">铸造通用网络原子积木，实时双屏语法沙箱校验</span>
+            <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">成品积木库 (Modules Inventory)</h1>
+            <span class="text-[10px] text-zinc-400">由母版派生独立实参成品，支持多出站、多分流实例复用</span>
+          </div>
+        {:else if ws.currentWorkspace === 'foundry'}
+          <Icon name="sliders" color="emerald" size={20} />
+          <div>
+            <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">原子语法母版工坊 (Foundry)</h1>
+            <span class="text-[10px] text-zinc-400">1:1 对标 Sing-box 官方字段模板与插孔定义，提供软链接指针</span>
           </div>
         {:else}
           <Icon name="server" color="blue" size={20} />
@@ -453,8 +449,9 @@
 
     {#key ws.currentWorkspace}
       <div class="flex flex-1 min-h-0 overflow-hidden relative">
+
+        <!-- ==================== 工作区 1: 装配大盘 (Studio) ==================== -->
         {#if ws.currentWorkspace === 'studio'}
-          <!-- 空间 1: 装配大盘 (Studio) -->
           <aside class="flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-950/40">
             <div class="flex h-12 items-center justify-between border-b border-zinc-200 px-3.5 dark:border-zinc-800">
               <span class="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">方案配方 (PROFILES)</span>
@@ -541,88 +538,60 @@
                   class="rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5"
                 >
                   <Icon name="plus" size={13} />
-                  <span>挂载积木</span>
+                  <span>装配成品积木</span>
                 </button>
               {/if}
             </div>
 
             <div class="flex-1 overflow-y-auto p-5 space-y-3">
-              {#if currentBindings.length === 0}
+              {#if ws.resolvedModuleBindings.length === 0}
                 <div class="flex h-80 flex-col items-center justify-center rounded-xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-800">
-                  <span class="text-xs text-zinc-400">当前方案暂未装配积木，点击右上角挑选积木挂载</span>
+                  <span class="text-xs text-zinc-400">当前方案暂未装配成品积木，点击右上角从积木库中挑选</span>
                 </div>
               {:else}
-                {#each currentBindings as item, idx (item.component?.id ?? idx)}
-                  {#if item.component}
-                    <!-- 关键改进：提取所有变量，不再过滤下划线变量，让用户完全掌控实参定制 -->
-                    {@const allVars = extractAllTemplateVars(item.component.payload_tmpl || '')}
-                    {@const currentParams = safeParseJson(item.binding.params_json)}
-                    <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm hover:border-zinc-300 dark:border-zinc-800/90 dark:bg-zinc-900/60 dark:hover:border-zinc-700 transition">
-                      <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                          <span class="font-mono text-xs font-bold text-zinc-400 dark:text-zinc-600">0{idx + 1}</span>
-                          <span class="text-xs font-semibold text-zinc-900 dark:text-zinc-100">{item.component.name}</span>
-                          <span class="rounded bg-zinc-200/80 px-2 py-0.5 font-mono text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">{item.component.mount_path}</span>
-                          <span class="text-[10px] font-mono text-zinc-400">[{item.component.scope_tag}]</span>
-                        </div>
-
-                        <div class="flex items-center gap-1.5">
-                          <button
-                            onclick={() => (expandedBindingCompId = expandedBindingCompId === item.component.id ? null : item.component.id)}
-                            class="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 cursor-pointer"
-                          >
-                            {expandedBindingCompId === item.component.id ? '收起实参' : '定制实参'}
-                          </button>
-                          <button disabled={idx === 0} onclick={() => ws.moveBinding(idx, 'up')} class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-200 disabled:opacity-30 dark:hover:bg-zinc-800 cursor-pointer">↑</button>
-                          <button disabled={idx === currentBindings.length - 1} onclick={() => ws.moveBinding(idx, 'down')} class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-200 disabled:opacity-30 dark:hover:bg-zinc-800 cursor-pointer">↓</button>
-                          <button onclick={() => ws.detachComponent(item.component.id)} class="rounded p-1 text-zinc-400 hover:text-rose-500 cursor-pointer">
-                            <Icon name="close" size={13} />
-                          </button>
-                        </div>
+                {#each ws.resolvedModuleBindings as item, idx (item.binding.id ?? idx)}
+                  {@const currentParams = safeParseJson(item.module.params_json)}
+                  <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm hover:border-zinc-300 dark:border-zinc-800/90 dark:bg-zinc-900/60 dark:hover:border-zinc-700 transition">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-3">
+                        <span class="font-mono text-xs font-bold text-zinc-400 dark:text-zinc-600">0{idx + 1}</span>
+                        <span class="text-xs font-semibold text-zinc-900 dark:text-zinc-100">{item.module.name}</span>
+                        <span class="rounded bg-zinc-200/80 px-2 py-0.5 font-mono text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                          {item.template?.mount_path || '自定义路径'}
+                        </span>
+                        <span class="text-[10px] text-zinc-400 font-mono">
+                          母版: {item.template?.name || item.module.template_id}
+                        </span>
                       </div>
 
-                      {#if expandedBindingCompId === item.component.id}
-                        <div class="mt-3.5 space-y-2.5 border-t border-zinc-200 pt-3 dark:border-zinc-800">
-                          <div class="flex items-center justify-between">
-                            <span class="text-[11px] font-bold text-zinc-600 dark:text-zinc-300 block">
-                              定制此方案实参 (变量覆写表):
-                            </span>
-                            <span class="text-[10px] text-zinc-400">留空则由系统环境或默认上下文填充</span>
-                          </div>
-
-                          {#if allVars.length === 0}
-                            <span class="text-[11px] text-zinc-400 italic block">当前积木为纯静态配置，无任何模板变量插孔。</span>
-                          {:else}
-                            <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
-                              {#each allVars as v (v)}
-                                <label class="block">
-                                  <div class="flex items-center justify-between mb-0.5">
-                                    <span class="text-[10px] font-mono text-zinc-500 truncate" title={v}>.{v}</span>
-                                    {#if v.startsWith('_')}
-                                      <span class="text-[9px] px-1 rounded bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 font-mono">环境插孔</span>
-                                    {/if}
-                                  </div>
-                                  <input
-                                    value={currentParams[v] ?? ''}
-                                    oninput={(e) => {
-                                      const val = (e.target as HTMLInputElement).value;
-                                      let parsed: string | number | boolean = val;
-                                      if (val.trim() !== '' && !isNaN(Number(val))) parsed = Number(val);
-                                      else if (val.toLowerCase() === 'true') parsed = true;
-                                      else if (val.toLowerCase() === 'false') parsed = false;
-                                      ws.updateBindingSingleParam(item.component.id, v, parsed);
-                                    }}
-                                    placeholder={v.startsWith('_') ? '使用全局默认 (留空)' : '输入实参值'}
-                                    class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                  />
-                                </label>
-                              {/each}
-                            </div>
-                          {/if}
-                        </div>
-                      {/if}
+                      <div class="flex items-center gap-1.5">
+                        <button
+                          onclick={() => {
+                            editingModule = item.module;
+                            showModuleModal = true;
+                          }}
+                          class="rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 cursor-pointer"
+                        >
+                          编辑实参
+                        </button>
+                        <button disabled={idx === 0} onclick={() => ws.moveModuleBinding(idx, 'up')} class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-200 disabled:opacity-30 dark:hover:bg-zinc-800 cursor-pointer">↑</button>
+                        <button disabled={idx === ws.resolvedModuleBindings.length - 1} onclick={() => ws.moveModuleBinding(idx, 'down')} class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-200 disabled:opacity-30 dark:hover:bg-zinc-800 cursor-pointer">↓</button>
+                        <button onclick={() => ws.detachModule(item.binding.id ?? item.module.id)} class="rounded p-1 text-zinc-400 hover:text-rose-500 cursor-pointer">
+                          <Icon name="close" size={13} />
+                        </button>
+                      </div>
                     </div>
-                  {/if}
+
+                    <div class="mt-2.5 pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 flex flex-wrap gap-2 text-[11px] font-mono">
+                      {#each Object.entries(currentParams) as [k, val] (k)}
+                        <span class="rounded bg-white dark:bg-zinc-950 px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">
+                          .{k}: <strong class="text-zinc-800 dark:text-zinc-200">{String(val)}</strong>
+                        </span>
+                      {:else}
+                        <span class="text-zinc-400 text-[10px] italic">该成品使用纯静态或系统环境上下文。</span>
+                      {/each}
+                    </div>
+                  </div>
                 {/each}
               {/if}
             </div>
@@ -696,23 +665,116 @@
             {/if}
           </section>
 
-        <!-- 空间 2: 原子资产工坊 (Library) -->
-        {:else if ws.currentWorkspace === 'library'}
-          <!-- 尺寸完全对齐大盘 w-64，具备管理模式与常规查看模式 -->
+        <!-- ==================== 工作区 2: 成品积木库 (Modules) ==================== -->
+        {:else if ws.currentWorkspace === 'modules'}
+          <div class="flex-1 overflow-y-auto p-8 max-w-6xl mx-auto w-full space-y-6">
+            <div class="flex items-center justify-between border-b border-zinc-200 pb-4 dark:border-zinc-800">
+              <div>
+                <h2 class="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                  <Icon name="boxes" color="blue" size={19} />
+                  <span>成品积木库 (Modules Inventory)</span>
+                </h2>
+                <p class="text-xs text-zinc-400 mt-1">每个积木引用工坊母版并赋予实参。大盘可无限制重复装配不同积木（如多个出站节点）。</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  onclick={() => { isModuleManageMode = !isModuleManageMode; selectedModuleIds = []; }}
+                  class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-sm hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 cursor-pointer flex items-center gap-1.5"
+                >
+                  <Icon name="sliders" size={13} />
+                  <span>{isModuleManageMode ? '退出管理' : '批量整理'}</span>
+                </button>
+                <button
+                  onclick={() => { editingModule = null; showModuleModal = true; }}
+                  class="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 shadow-sm transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <Icon name="plus" size={14} />
+                  <span>新建成品积木</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {#each ws.modules as mod (mod.id)}
+                {@const pMap = safeParseJson(mod.params_json)}
+                <div class="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700 transition flex flex-col justify-between space-y-3">
+                  <div>
+                    <div class="flex items-start justify-between">
+                      <div class="flex items-center gap-2">
+                        {#if isModuleManageMode}
+                          <input
+                            type="checkbox"
+                            checked={selectedModuleIds.includes(mod.id)}
+                            onchange={(e) => {
+                              if ((e.target as HTMLInputElement).checked) selectedModuleIds = [...selectedModuleIds, mod.id];
+                              else selectedModuleIds = selectedModuleIds.filter(id => id !== mod.id);
+                            }}
+                            class="rounded"
+                          />
+                        {/if}
+                        <div>
+                          <h3 class="text-sm font-bold text-zinc-900 dark:text-zinc-100">{mod.name}</h3>
+                          <span class="text-[10px] text-zinc-400 font-mono">母版: {mod.template?.name || mod.template_id}</span>
+                        </div>
+                      </div>
+                      <span class="rounded bg-zinc-100 px-2 py-0.5 text-[10px] font-mono text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                        {mod.category}
+                      </span>
+                    </div>
+
+                    <div class="mt-2 text-[11px] text-zinc-500 font-mono flex items-center gap-1">
+                      <span class="text-zinc-400">挂载点:</span>
+                      <strong class="text-zinc-700 dark:text-zinc-300">{mod.template?.mount_path || '未指定'}</strong>
+                    </div>
+
+                    <div class="mt-2 p-2 rounded-lg bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-100 dark:border-zinc-800/80 space-y-1 text-[10px] font-mono">
+                      {#each Object.entries(pMap) as [key, val] (key)}
+                        <div class="truncate text-zinc-600 dark:text-zinc-400">
+                          .{key} = <span class="text-blue-600 dark:text-blue-400">{String(val)}</span>
+                        </div>
+                      {:else}
+                        <div class="text-zinc-400 italic">纯静态，无需实参</div>
+                      {/each}
+                    </div>
+                  </div>
+
+                  <div class="flex items-center justify-end gap-1.5 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+                    <button
+                      onclick={() => { editingModule = mod; showModuleModal = true; }}
+                      class="p-1 rounded text-zinc-400 hover:text-blue-500 cursor-pointer"
+                      title="编辑实参"
+                    >
+                      <Icon name="pencil" size={13} />
+                    </button>
+                    <button
+                      onclick={() => triggerConfirm('删除成品积木？', `将永久删除积木 [${mod.name}]。方案引用也将解除。`, () => ws.batchDeleteModules([mod.id]))}
+                      class="p-1 rounded text-zinc-400 hover:text-rose-500 cursor-pointer"
+                      title="删除积木"
+                    >
+                      <Icon name="trash" size={13} />
+                    </button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+
+        <!-- ==================== 工作区 3: 语法母版工坊 (Foundry) ==================== -->
+        {:else if ws.currentWorkspace === 'foundry'}
           <aside class="flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-950/40">
             <div class="flex h-12 items-center justify-between border-b border-zinc-200 px-3.5 dark:border-zinc-800">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">积木母版库 (BLOCKS)</span>
+              <span class="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">语法母版库 (TEMPLATES)</span>
               <div class="flex items-center gap-1">
                 <button
-                  title={isCompManageMode ? '退出管理' : '批量整理积木'}
+                  title={isCompManageMode ? '退出管理' : '批量整理母版'}
                   onclick={() => { isCompManageMode = !isCompManageMode; selectedCompIds = []; }}
                   class="flex h-6 w-6 items-center justify-center rounded text-xs transition cursor-pointer {isCompManageMode ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 font-bold' : 'text-zinc-400 hover:bg-zinc-200/50 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
                 >
                   <Icon name="sliders" size={14} />
                 </button>
                 <button
-                  title="新建积木母版"
-                  onclick={() => { editingComponent = null; showNewCompModal = true; }}
+                  title="新建语法母版"
+                  onclick={() => { showNewCompModal = true; }}
                   class="flex h-6 w-6 items-center justify-center rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/50 cursor-pointer"
                 >
                   <Icon name="plus" size={15} />
@@ -769,7 +831,6 @@
                               class="rounded"
                             />
                           {/if}
-                          <!-- 常规状态直接点击展示 -->
                           <button onclick={() => selectStudioComp(comp)} class="truncate text-left flex-1 cursor-pointer">
                             {comp.name}
                           </button>
@@ -780,15 +841,8 @@
                             <span class="font-mono text-[9px] text-zinc-400">[{comp.scope_tag}]</span>
                           {:else}
                             <button
-                              title="编辑积木元数据"
-                              onclick={() => { editingComponent = comp; showNewCompModal = true; }}
-                              class="text-zinc-400 hover:text-blue-500 cursor-pointer p-0.5"
-                            >
-                              <Icon name="pencil" size={13} />
-                            </button>
-                            <button
-                              title="移除积木母版"
-                              onclick={() => triggerConfirm('确认删除积木？', `将永久删除母版 [${comp.name}]。`, () => ws.batchDeleteComponents([comp.id]))}
+                              title="删除母版"
+                              onclick={() => triggerConfirm('确认删除母版？', `将永久删除母版 [${comp.name}]。所有引用此母版的成品积木也会被级联删除。`, () => ws.batchDeleteComponents([comp.id]))}
                               class="text-zinc-400 hover:text-rose-500 cursor-pointer p-0.5"
                             >
                               <Icon name="trash" size={13} />
@@ -803,7 +857,7 @@
             </div>
           </aside>
 
-          <!-- 右侧工坊编辑器 -->
+          <!-- 右侧工坊编辑器与沙箱 -->
           <main class="flex flex-1 min-w-0 overflow-hidden bg-white dark:bg-zinc-950">
             <div class="flex flex-1 flex-col border-r border-zinc-200 dark:border-zinc-800">
               <div class="flex h-12 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
@@ -856,7 +910,6 @@
                 />
               </div>
 
-              <!-- 参数桩 Mock Inputs -->
               <div class="border-t border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/70 space-y-2">
                 <div class="flex items-center justify-between">
                   <span class="text-xs font-bold text-zinc-700 dark:text-zinc-300">自动侦测参数桩 (Mock Inputs):</span>
@@ -911,7 +964,7 @@
             </div>
           </main>
 
-        <!-- 空间 3: 节点与实例 (Fleet) -->
+        <!-- ==================== 工作区 4: 节点管理 (Fleet) ==================== -->
         {:else if ws.currentWorkspace === 'fleet'}
           <div class="flex-1 overflow-y-auto p-8 max-w-6xl mx-auto w-full space-y-6">
             <div class="flex items-center justify-between border-b border-zinc-200 pb-4 dark:border-zinc-800">
@@ -1021,7 +1074,9 @@
                         <button
                           onclick={() => {
                             ws.switchWorkspace('studio');
-                            ws.selectProfile(dev.target_profile_id);
+                            if (dev.target_profile_id) {
+                              ws.selectProfile(dev.target_profile_id);
+                            }
                           }}
                           class="rounded bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400 cursor-pointer transition flex items-center gap-1"
                         >
@@ -1062,12 +1117,16 @@
         {/if}
 
         <!-- 批量管理浮岛 -->
-        {#if selectedCompIds.length > 0 || selectedDeviceIds.length > 0 || selectedProfileIds.length > 0}
+        {#if selectedCompIds.length > 0 || selectedModuleIds.length > 0 || selectedDeviceIds.length > 0 || selectedProfileIds.length > 0}
           <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-full border border-zinc-700 bg-zinc-900/95 px-5 py-2.5 shadow-2xl backdrop-blur-md text-xs text-white">
             {#if selectedCompIds.length > 0}
-              <span>已选 <strong>{selectedCompIds.length}</strong> 个积木</span>
-              <button onclick={() => triggerConfirm('确认批量删除？', `即将永久删除已选的 ${selectedCompIds.length} 个积木。`, () => { ws.batchDeleteComponents(selectedCompIds); selectedCompIds = []; isCompManageMode = false; })} class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
+              <span>已选 <strong>{selectedCompIds.length}</strong> 个母版</span>
+              <button onclick={() => triggerConfirm('确认批量删除？', `即将永久删除已选的 ${selectedCompIds.length} 个母版。`, () => { ws.batchDeleteComponents(selectedCompIds); selectedCompIds = []; isCompManageMode = false; })} class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
               <button onclick={() => { selectedCompIds = []; isCompManageMode = false; }} class="text-zinc-400 hover:text-white cursor-pointer">取消</button>
+            {:else if selectedModuleIds.length > 0}
+              <span>已选 <strong>{selectedModuleIds.length}</strong> 个成品积木</span>
+              <button onclick={() => triggerConfirm('确认批量删除？', `即将永久删除已选的 ${selectedModuleIds.length} 个成品积木。`, () => { ws.batchDeleteModules(selectedModuleIds); selectedModuleIds = []; isModuleManageMode = false; })} class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
+              <button onclick={() => { selectedModuleIds = []; isModuleManageMode = false; }} class="text-zinc-400 hover:text-white cursor-pointer">取消</button>
             {:else if selectedDeviceIds.length > 0}
               <span>已选 <strong>{selectedDeviceIds.length}</strong> 个节点</span>
               <button onclick={() => triggerConfirm('确认批量移除？', `即将永久移除已选的 ${selectedDeviceIds.length} 个节点。`, () => { ws.batchDeleteDevices(selectedDeviceIds); selectedDeviceIds = []; isDeviceManageMode = false; })} class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
@@ -1086,7 +1145,8 @@
 
 <MountDrawer open={showMountDrawer} onClose={async () => { showMountDrawer = false; await ws.loadProfiles(); }} />
 <SettingsDrawer open={ws.showSettingsDrawer} onClose={() => (ws.showSettingsDrawer = false)} />
-<ComponentModal open={showNewCompModal} editComponent={editingComponent} onClose={() => { showNewCompModal = false; editingComponent = null; }} onSave={handleSaveComponent} />
+<ComponentModal open={showNewCompModal} onClose={() => { showNewCompModal = false; }} onCreate={handleCreateComponent} />
+<ModuleModal open={showModuleModal} editModule={editingModule} onClose={() => { showModuleModal = false; editingModule = null; }} onSave={handleSaveModule} />
 <DeviceModal open={showDeviceModal} editDevice={editingDevice} onClose={() => (showDeviceModal = false)} onSave={handleSaveDevice} />
 <ProfileModal open={showProfileModal} editProfile={editingProfile} onClose={() => (showProfileModal = false)} onSave={handleSaveProfile} />
 
