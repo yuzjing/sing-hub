@@ -1,0 +1,24 @@
+# 阶段 1: 构建 Svelte 5 前端
+FROM denoland/deno:alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/ .
+RUN deno task build
+
+# 阶段 2: 构建 Go 静态二进制
+FROM golang:alpine AS backend-builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# 将前端产物拷贝到 internal/server/dist 供 embed 打包
+COPY --from=frontend-builder /app/frontend/build ./internal/server/dist
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o sing-hub ./cmd/sing-hub
+
+# 阶段 3: 最小安全运行镜像 (体积 < 25MB)
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates tzdata
+WORKDIR /app
+COPY --from=backend-builder /app/sing-hub .
+EXPOSE 8080
+VOLUME ["/data"]
+ENTRYPOINT ["/app/sing-hub", "-addr", ":8080", "-db", "/data/sing-hub.db"]

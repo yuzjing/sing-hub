@@ -1,0 +1,13 @@
+[Unit]
+Description=Sing-Box Configuration Hub (Rootless)
+After=network-online.target
+
+[Container]
+Image=localhost/sing-hub:latest
+ContainerName=sing-hub
+Volume=%h/data/sing-hub:/data:Z
+PublishPort=8080:8080
+Restart=always
+
+[Install]
+WantedBy=default.target
