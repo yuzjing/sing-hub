@@ -341,9 +341,36 @@ func (s *Store) ListProfiles(ctx context.Context) ([]model.Profile, error) {
 			EnablePing:      ping == 1,
 			EnablePush:      push == 1,
 		}
+		p.Modules = make([]model.ProfileModuleBinding, 0)
 		list = append(list, p)
 	}
-	return list, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// 同时查出关联 modules，避免 loadProfiles() 冲刷掉大盘挂载状态
+	bRows, err := s.db.QueryContext(ctx, "SELECT id, profile_id, module_id, order_index FROM profile_modules ORDER BY order_index ASC")
+	if err == nil {
+		defer bRows.Close()
+		bindMap := make(map[string][]model.ProfileModuleBinding)
+		for bRows.Next() {
+			var b model.ProfileModuleBinding
+			if err := bRows.Scan(&b.ID, &b.ProfileID, &b.ModuleID, &b.OrderIndex); err == nil {
+				bindMap[b.ProfileID] = append(bindMap[b.ProfileID], b)
+			}
+		}
+		for i := range list {
+			if binds, ok := bindMap[list[i].ID]; ok {
+				list[i].Modules = binds
+			}
+		}
+	}
+
+	if err := bRows.Err(); err != nil {
+		return nil, err
+	}
+
+	return list, nil
 }
 
 func (s *Store) GetProfile(ctx context.Context, id string) (*model.Profile, error) {

@@ -26,11 +26,12 @@ class ApiClient {
           errMsg = errObj.error;
         }
       } catch {
-        // 无 JSON 则回退
+        // 无法解析 JSON 则采用默认错误提示
       }
       throw new Error(errMsg);
     }
 
+    // 处理 204 No Content
     if (res.status === 204) {
       return {} as T;
     }
@@ -38,7 +39,7 @@ class ApiClient {
     return res.json();
   }
 
-  // ==================== 1. Components (工坊母版) ====================
+  // ==================== 1. Components (第 1 层：工坊语法母版) ====================
 
   async getComponents(): Promise<Component[]> {
     return this.request<Component[]>('/api/components');
@@ -65,19 +66,18 @@ class ApiClient {
   }
 
   async previewComponent(tmpl: string, paramsJson: string, nodeId: string = ''): Promise<string> {
-    // 严格匹配后端的 payload_tmpl 与 params_json 字段
     const data = await this.request<{ json: string }>('/api/components/preview', {
       method: 'POST',
       body: JSON.stringify({
-        payload_tmpl: tmpl,
-        params_json: paramsJson,
+        template: tmpl,
+        params: paramsJson,
         node_id: nodeId,
       }),
     });
     return data.json;
   }
 
-  // ==================== 2. Modules (成品积木库) ====================
+  // ==================== 2. Modules (第 2 层：成品积木库) ====================
 
   async getModules(): Promise<Module[]> {
     return this.request<Module[]>('/api/modules');
@@ -103,7 +103,7 @@ class ApiClient {
     });
   }
 
-  // ==================== 3. Profiles (大盘方案) ====================
+  // ==================== 3. Profiles (第 3 层：大盘方案配方) ====================
 
   async getProfiles(): Promise<Profile[]> {
     return this.request<Profile[]>('/api/profiles');
@@ -133,22 +133,10 @@ class ApiClient {
     });
   }
 
-  // 编译直接接收返回的 JSON，并从响应头中捕获 Git Commit Hash
   async compileProfile(id: string): Promise<{ json: string; commitHash: string }> {
-    const res = await fetch(`/api/profiles/${id}/compile`, {
+    return this.request<{ json: string; commitHash: string }>(`/api/profiles/${id}/compile`, {
       method: 'POST',
     });
-    if (!res.ok) {
-      let errMsg = `编译失败: HTTP ${res.status}`;
-      try {
-        const errObj = await res.json();
-        if (errObj && errObj.error) errMsg = errObj.error;
-      } catch {}
-      throw new Error(errMsg);
-    }
-    const commitHash = res.headers.get('X-Commit-Hash') || '';
-    const json = await res.text();
-    return { json, commitHash };
   }
 
   async getHistory(profileId: string): Promise<CommitRecord[]> {
@@ -156,18 +144,17 @@ class ApiClient {
   }
 
   async getDiff(profileId: string, commit: string): Promise<{ diff: string }> {
-    return this.request<{ diff: string }>(`/api/profiles/${profileId}/diff?commit=${commit}`);
+    return this.request<{ diff: string }>(`/api/profiles/${profileId}/diff/${commit}`);
   }
 
   async rollback(profileId: string, commit: string): Promise<string> {
-    const res = await this.request<{ json: string }>(`/api/profiles/${profileId}/rollback`, {
+    const res = await this.request<{ json: string }>(`/api/profiles/${profileId}/rollback/${commit}`, {
       method: 'POST',
-      body: JSON.stringify({ commit }),
     });
     return res.json;
   }
 
-  // ==================== 4. Devices (节点运维) ====================
+  // ==================== 4. Devices (基础设施节点运维) ====================
 
   async getDevices(): Promise<Device[]> {
     return this.request<Device[]>('/api/devices');
@@ -211,42 +198,42 @@ class ApiClient {
     });
   }
 
-  // ==================== 5. System Settings & Backups (对齐 /api/system/ 路径) ====================
+  // ==================== 5. Settings & Backups (系统设置与快照热恢复) ====================
 
   async getSettings(): Promise<Record<string, string>> {
-    return this.request<Record<string, string>>('/api/system/settings');
+    return this.request<Record<string, string>>('/api/settings');
   }
 
   async saveSettings(settings: Record<string, string>): Promise<void> {
-    return this.request<void>('/api/system/settings', {
+    return this.request<void>('/api/settings', {
       method: 'POST',
       body: JSON.stringify(settings),
     });
   }
 
   async getLogLevel(): Promise<{ level: string }> {
-    return this.request<{ level: string }>('/api/system/log-level');
+    return this.request<{ level: string }>('/api/settings/loglevel');
   }
 
   async setLogLevel(level: 'INFO' | 'DEBUG'): Promise<void> {
-    return this.request<void>('/api/system/log-level', {
+    return this.request<void>('/api/settings/loglevel', {
       method: 'POST',
       body: JSON.stringify({ level }),
     });
   }
 
   async listServerBackups(): Promise<{ file_name: string; path: string; size_bytes: number; created_at: string }[]> {
-    return this.request<{ file_name: string; path: string; size_bytes: number; created_at: string }[]>('/api/system/backups');
+    return this.request<{ file_name: string; path: string; size_bytes: number; created_at: string }[]>('/api/settings/backups');
   }
 
-  async createServerBackup(): Promise<{ file_name: string; path: string }> {
-    return this.request<{ file_name: string; path: string }>('/api/system/backup/create', {
+  async createServerBackup(): Promise<{ file_name: string }> {
+    return this.request<{ file_name: string }>('/api/settings/backups', {
       method: 'POST',
     });
   }
 
   async restoreFromServerPath(path: string): Promise<void> {
-    return this.request<void>('/api/system/restore/path', {
+    return this.request<void>('/api/settings/backups/restore', {
       method: 'POST',
       body: JSON.stringify({ path }),
     });

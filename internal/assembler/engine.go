@@ -40,37 +40,182 @@ func funcMap() template.FuncMap {
 	}
 }
 
-// PreviewComponent 纯语法模板渲染预览
-func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSON string) (string, error) {
-	var params map[string]any
-	if strings.TrimSpace(paramsJSON) == "" {
-		params = make(map[string]any)
-	} else {
-		if err := json.Unmarshal([]byte(paramsJSON), &params); err != nil {
-			params = make(map[string]any)
+// unflattenParams 将类似 "_node.endpoint" 扁平键转换为嵌套结构
+func unflattenParams(raw map[string]any) map[string]any {
+	result := make(map[string]any)
+	for key, val := range raw {
+		cleanKey := strings.TrimPrefix(key, ".")
+		parts := strings.Split(cleanKey, ".")
+		curr := result
+		for i := 0; i < len(parts)-1; i++ {
+			p := parts[i]
+			if _, exists := curr[p]; !exists {
+				curr[p] = make(map[string]any)
+			}
+			if nextMap, ok := curr[p].(map[string]any); ok {
+				curr = nextMap
+			}
 		}
+		curr[parts[len(parts)-1]] = val
+	}
+	return result
+}
+
+// resolveNodeReferences 解析 @node:<node_id>.<prop> 动态引用
+// resolveNodeReferences 增强版：支持 @node:<id>.ipv4, @node:<id>.ipv6, @node:<id>.domain, @node:<id>.endpoint
+func (e *Engine) resolveNodeReferences(ctx context.Context, params map[string]any) {
+	devices, err := e.store.ListDevices(ctx)
+	if err != nil {
+		return
+	}
+	devMap := make(map[string]model.Device)
+	for _, d := range devices {
+		devMap[d.ID] = d
+	}
+
+	isIPv4 := func(ip string) bool {
+		return strings.Count(ip, ".") == 3 && !strings.Contains(ip, ":")
+	}
+	isIPv6 := func(ip string) bool {
+		return strings.Contains(ip, ":")
+	}
+
+	var walk func(m map[string]any)
+	walk = func(m map[string]any) {
+		for k, v := range m {
+			if strVal, ok := v.(string); ok {
+				if strings.HasPrefix(strVal, "@node:") {
+					parts := strings.Split(strings.TrimPrefix(strVal, "@node:"), ".")
+					if len(parts) >= 2 {
+						nodeID := parts[0]
+						prop := parts[1]
+						if dev, exists := devMap[nodeID]; exists {
+							switch prop {
+							case "endpoint":
+								if len(dev.Endpoints) > 0 {
+									m[k] = dev.Endpoints[0]
+								} else {
+									m[k] = "127.0.0.1"
+								}
+							case "ipv4":
+								found := ""
+								for _, ep := range dev.Endpoints {
+									if isIPv4(ep) {
+										found = ep
+										break
+									}
+								}
+								if found == "" && len(dev.Endpoints) > 0 {
+									found = dev.Endpoints[0]
+								}
+								m[k] = found
+							case "ipv6":
+								found := ""
+								for _, ep := range dev.Endpoints {
+									if isIPv6(ep) {
+										found = ep
+										break
+									}
+								}
+								if found == "" && len(dev.Endpoints) > 0 {
+									found = dev.Endpoints[0]
+								}
+								m[k] = found
+							case "domain":
+								found := ""
+								for _, ep := range dev.Endpoints {
+									if !isIPv4(ep) && !isIPv6(ep) {
+										found = ep
+										break
+									}
+								}
+								if found == "" && len(dev.Endpoints) > 0 {
+									found = dev.Endpoints[0]
+								}
+								m[k] = found
+							case "ssh_host":
+								m[k] = dev.SSHHost
+							case "id":
+								m[k] = dev.ID
+							case "name":
+								m[k] = dev.Name
+							}
+						}
+					}
+				} else if strings.HasPrefix(strVal, "@sec:token") {
+					m[k] = e.store.GetSetting(ctx, "git_token", "")
+				} else if strings.HasPrefix(strVal, "@net:easytier_cidr") {
+					m[k] = e.store.GetSetting(ctx, "easytier_cidr", "10.144.0.0/16")
+				}
+			} else if subMap, ok := v.(map[string]any); ok {
+				walk(subMap)
+			}
+		}
+	}
+	walk(params)
+}
+
+func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSON string) (string, error) {
+	if strings.TrimSpace(tmplStr) == "" {
+		return "{\n}", nil
+	}
+
+	rawParams := make(map[string]any)
+	if strings.TrimSpace(paramsJSON) != "" {
+		_ = json.Unmarshal([]byte(paramsJSON), &rawParams)
+	}
+
+	params := unflattenParams(rawParams)
+	e.resolveNodeReferences(ctx, params)
+
+	// 注入默认上下文，防止留空时模板崩溃
+	nodeMap, ok := params["_node"].(map[string]any)
+	if !ok {
+		nodeMap = make(map[string]any)
+		params["_node"] = nodeMap
+	}
+	if _, ok := nodeMap["id"]; !ok {
+		nodeMap["id"] = "mock-node"
+	}
+	if _, ok := nodeMap["name"]; !ok {
+		nodeMap["name"] = "测试节点"
+	}
+	if _, ok := nodeMap["endpoint"]; !ok {
+		nodeMap["endpoint"] = "10.123.123.1"
+	}
+	if _, ok := nodeMap["ssh_host"]; !ok {
+		nodeMap["ssh_host"] = "10.123.123.1"
+	}
+
+	if _, ok := params["_net"]; !ok {
+		params["_net"] = map[string]any{"easytier_cidr": "10.144.0.0/16"}
+	}
+	if _, ok := params["_sec"]; !ok {
+		params["_sec"] = map[string]any{"uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "password": "mock_password"}
+	}
+	if _, ok := params["_profile"]; !ok {
+		params["_profile"] = map[string]any{"id": "mock-profile", "name": "测试方案", "token": "mock_token", "version": "1.10.0"}
 	}
 
 	tmpl, err := template.New("preview").Funcs(funcMap()).Parse(tmplStr)
 	if err != nil {
-		return "", fmt.Errorf("template parse error: %w", err)
+		return "", fmt.Errorf("模板解析错误: %w", err)
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, params); err != nil {
-		return "", fmt.Errorf("template execute error: %w", err)
+		return "", fmt.Errorf("模板执行错误: %w", err)
 	}
 
 	var validate any
 	if err := json.Unmarshal(buf.Bytes(), &validate); err != nil {
-		return "", fmt.Errorf("rendered invalid json: %w\n%s", err, buf.String())
+		return "", fmt.Errorf("输出不是合法 JSON: %w\n渲染结果:\n%s", err, buf.String())
 	}
 
 	pretty, _ := json.MarshalIndent(validate, "", "  ")
 	return string(pretty), nil
 }
 
-// Assemble 编译方案：大盘将所有挂载的成品积木按照顺序动态组装进最终完整的 config.json
 func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string, error) {
 	start := time.Now()
 	slog.Info("assembling profile from modules", "profile_id", profileID)
@@ -80,7 +225,6 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 		return nil, "", fmt.Errorf("get profile failed: %w", err)
 	}
 
-	// 取出该方案的所有成品积木解析项 (包含软链接对应的最新母版)
 	resolvedModules, err := e.store.GetResolvedProfileModules(ctx, profileID)
 	if err != nil {
 		return nil, "", fmt.Errorf("load resolved modules failed: %w", err)
@@ -98,18 +242,28 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 	root := make(map[string]any)
 
 	for _, item := range resolvedModules {
-		var params map[string]any
-		if strings.TrimSpace(item.Module.ParamsJSON) == "" {
-			params = make(map[string]any)
-		} else {
-			_ = json.Unmarshal([]byte(item.Module.ParamsJSON), &params)
+		rawParams := make(map[string]any)
+		if strings.TrimSpace(item.Module.ParamsJSON) != "" {
+			_ = json.Unmarshal([]byte(item.Module.ParamsJSON), &rawParams)
 		}
+
+		params := unflattenParams(rawParams)
+		e.resolveNodeReferences(ctx, params)
 
 		params["_profile"] = map[string]any{
 			"id":      profile.ID,
 			"name":    profile.Name,
 			"token":   profile.Token,
 			"version": profile.SingBoxVersion,
+		}
+
+		params["_net"] = map[string]any{
+			"easytier_cidr": e.store.GetSetting(ctx, "easytier_cidr", "10.144.0.0/16"),
+		}
+
+		params["_sec"] = map[string]any{
+			"uuid":     profile.Token,
+			"password": profile.Token,
 		}
 
 		if associatedDevice != nil {
@@ -127,32 +281,30 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 		} else {
 			params["_node"] = map[string]any{
 				"id":       "unassigned",
-				"name":     "未关联物理节点",
+				"name":     "未关联节点",
 				"endpoint": "127.0.0.1",
 				"ssh_host": "127.0.0.1",
 				"tags":     []string{},
 			}
 		}
 
-		// 保证执行的是最新母版模板 (item.Template 是指针最新查出的)
 		tmpl, err := template.New(item.Module.ID).Funcs(funcMap()).Parse(item.Template.PayloadTmpl)
 		if err != nil {
-			return nil, "", fmt.Errorf("module [%s] template syntax error: %w", item.Module.Name, err)
+			return nil, "", fmt.Errorf("积木 [%s] 语法错误: %w", item.Module.Name, err)
 		}
 
 		var rendered bytes.Buffer
 		if err := tmpl.Execute(&rendered, params); err != nil {
-			return nil, "", fmt.Errorf("module [%s] render error: %w", item.Module.Name, err)
+			return nil, "", fmt.Errorf("积木 [%s] 渲染错误: %w", item.Module.Name, err)
 		}
 
 		var chunk any
 		if err := json.Unmarshal(rendered.Bytes(), &chunk); err != nil {
-			return nil, "", fmt.Errorf("module [%s] rendered invalid json: %w\n%s", item.Module.Name, err, rendered.String())
+			return nil, "", fmt.Errorf("积木 [%s] 产生非法 JSON: %w\n%s", item.Module.Name, err, rendered.String())
 		}
 
-		// 挂载到根配置树 (MountPath 支持点分路径，如 "dns.servers")
 		if err := mount(root, item.Template.MountPath, item.Template.Strategy, chunk); err != nil {
-			return nil, "", fmt.Errorf("mount module [%s] failed: %w", item.Module.Name, err)
+			return nil, "", fmt.Errorf("装配积木 [%s] 失败: %w", item.Module.Name, err)
 		}
 	}
 

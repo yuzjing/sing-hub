@@ -4,13 +4,17 @@ import type { Profile, Component, Module, Device, ProfileModuleBinding, CommitRe
 
 export class WorkspaceState {
   profiles = $state<Profile[]>([]);
-  modules = $state<Module[]>([]);       // 第 2 层成品积木
-  components = $state<Component[]>([]); // 第 1 层母版
+  modules = $state<Module[]>([]);
+  components = $state<Component[]>([]);
   devices = $state<Device[]>([]);
 
   currentWorkspace = $state<'studio' | 'modules' | 'foundry' | 'fleet'>('studio');
   showSettingsDrawer = $state(false);
   isSidebarExpanded = $state(false);
+
+  // 跨页面草稿持久暂存器 (解决切换页面草稿消失问题)
+  compDrafts = $state<Record<string, { code: string; isDirty: boolean }>>({});
+  moduleDrafts = $state<Record<string, { params: Record<string, string | number | boolean>; isDirty: boolean }>>({});
 
   nodePingStatuses = $state<Record<string, { loading: boolean; latency?: number; online?: boolean; error?: string }>>({});
   isPingAllLoading = $state(false);
@@ -44,7 +48,6 @@ export class WorkspaceState {
     return this.profiles.find((p: Profile) => p.id === this.activeProfileId) || null;
   });
 
-  // 大盘流水线：解析方案引用的所有成品积木，并关联其母版的最新元数据
   resolvedModuleBindings = $derived.by(() => {
     if (!this.activeProfile) return [];
     const modMap = Object.fromEntries(this.modules.map((m: Module) => [m.id, m]));
@@ -292,7 +295,6 @@ export class WorkspaceState {
     await this.loadProfiles();
   }
 
-  // 大盘模块排序调整
   async moveModuleBinding(index: number, direction: 'up' | 'down') {
     if (!this.activeProfile) return;
     const bindings = [...this.activeProfile.modules];
@@ -312,7 +314,6 @@ export class WorkspaceState {
     this.triggerCompile();
   }
 
-  // 挂载成品模块（天然支持多次挂载不同实例）
   async attachModules(moduleIds: string[]) {
     if (!this.activeProfile) return;
     let maxOrder = (this.activeProfile.modules || []).reduce(
@@ -336,7 +337,6 @@ export class WorkspaceState {
     this.triggerCompile();
   }
 
-  // 卸载方案中的某个挂载实例
   async detachModule(bindingId: string) {
     if (!this.activeProfile) return;
     this.activeProfile.modules = this.activeProfile.modules.filter(

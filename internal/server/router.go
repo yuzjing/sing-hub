@@ -83,6 +83,7 @@ func (s *Server) routes() {
 
 	// 大盘装配、编译、历史与回滚
 	s.mux.HandleFunc("GET /api/profiles/{id}/compile", s.handleCompileProfile)
+	s.mux.HandleFunc("POST /api/profiles/{id}/compile", s.handleCompileProfile)
 	s.mux.HandleFunc("GET /api/profiles/{id}/history", s.handleProfileHistory)
 	s.mux.HandleFunc("GET /api/profiles/{id}/diff", s.handleProfileDiff)
 	s.mux.HandleFunc("POST /api/profiles/{id}/rollback", s.handleProfileRollback)
@@ -175,7 +176,9 @@ func (s *Server) handleCompileProfile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePreviewComponent(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Template    string `json:"template"`
 		PayloadTmpl string `json:"payload_tmpl"`
+		Params      string `json:"params"`
 		ParamsJSON  string `json:"params_json"`
 		NodeID      string `json:"node_id"`
 	}
@@ -184,15 +187,23 @@ func (s *Server) handlePreviewComponent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	preview, err := s.assembler.PreviewComponent(r.Context(), req.PayloadTmpl, req.ParamsJSON)
+	// 双向兼容字段取值
+	tmplStr := req.Template
+	if strings.TrimSpace(tmplStr) == "" {
+		tmplStr = req.PayloadTmpl
+	}
+	paramsStr := req.Params
+	if strings.TrimSpace(paramsStr) == "" {
+		paramsStr = req.ParamsJSON
+	}
+
+	res, err := s.assembler.PreviewComponent(r.Context(), tmplStr, paramsStr)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(preview))
+	writeJSON(w, http.StatusOK, map[string]string{"json": res})
 }
 
 func (s *Server) handleProfileHistory(w http.ResponseWriter, r *http.Request) {
