@@ -1,6 +1,6 @@
 // frontend/src/lib/workspace.svelte.ts
 import { api } from './api';
-import type { Profile, Component, Module, Device, ProfileModuleBinding, CommitRecord, NodePingReport } from './types';
+import type { Profile, Component, Module, Device, ProfileModuleBinding, CommitRecord, NodePingReport, UpdaterStatus, ValidationReport } from './types';
 
 export class WorkspaceState {
   profiles = $state<Profile[]>([]);
@@ -10,6 +10,7 @@ export class WorkspaceState {
 
   currentWorkspace = $state<'studio' | 'modules' | 'foundry' | 'fleet'>('studio');
   showSettingsDrawer = $state(false);
+  updaterStatus = $state<UpdaterStatus | null>(null);
   isSidebarExpanded = $state(false);
 
   // 跨页面草稿持久暂存器 (解决切换页面草稿消失问题)
@@ -122,11 +123,17 @@ export class WorkspaceState {
       this.loadDevices(),
       this.loadSettings(),
       this.loadServerBackups(),
-      this.fetchLogLevel()
+      this.fetchLogLevel(),
+      this.fetchUpdaterStatus() 
     ]);
     if (this.profiles.length > 0 && !this.activeProfileId) {
       this.selectProfile(this.profiles[0].id);
     }
+    // 后台持续轮询内核状态
+    setInterval(() => {
+      if (this.showSettingsDrawer) this.fetchUpdaterStatus();
+    }, 5000);
+
   }
 
   async loadSettings() {
@@ -222,6 +229,10 @@ export class WorkspaceState {
     this.triggerCompile();
   }
 
+  
+  
+  validationReport = $state<ValidationReport | null>(null);
+
   async triggerCompile() {
     if (!this.activeProfileId) return;
     this.isCompiling = true;
@@ -230,12 +241,21 @@ export class WorkspaceState {
       const res = await api.compileProfile(this.activeProfileId);
       this.compiledJSON = res.json;
       this.activeCommitHash = res.commitHash;
+      this.validationReport = res.validation || null;
     } catch (e: unknown) {
-      this.compileError = e instanceof Error ? e.message : '编译错误';
+      this.compileError = e instanceof Error ? e.message : '编译异常';
     } finally {
       this.isCompiling = false;
     }
   }
+
+  async fetchUpdaterStatus() {
+    try {
+      this.updaterStatus = await api.getUpdaterStatus();
+    } catch {}
+  }
+
+  
 
   async pingNode(nodeId: string) {
     this.nodePingStatuses[nodeId] = { loading: true };
@@ -373,6 +393,8 @@ export class WorkspaceState {
     await api.batchDeleteDevices(ids);
     await this.loadDevices();
   }
+
+    
 }
 
 export const ws = new WorkspaceState();

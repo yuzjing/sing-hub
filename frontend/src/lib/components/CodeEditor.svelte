@@ -6,80 +6,96 @@
   import { json } from '@codemirror/lang-json';
   import { oneDark } from '@codemirror/theme-one-dark';
 
-  let {
-    value = '',
-    readonly = false,
-    dark = true,
-    onChange
-  }: {
+  interface Props {
     value?: string;
     readonly?: boolean;
     dark?: boolean;
     onChange?: (val: string) => void;
-  } = $props();
+  }
+
+  let {
+    value = '',
+    readonly = false,
+    dark = true,
+    onChange = () => {}
+  }: Props = $props();
 
   let editorElement: HTMLDivElement;
   let view: EditorView | null = null;
   const themeCompartment = new Compartment();
+  const readonlyCompartment = new Compartment();
 
-  // 关键：导出给父组件调用的“光标处精确插入”方法
   export function insertAtCursor(snippet: string) {
     if (!view) return;
-    const ranges = view.state.selection.ranges;
-    const mainRange = ranges[0] ?? { from: view.state.doc.length, to: view.state.doc.length };
-    
+    const { from, to } = view.state.selection.main;
     view.dispatch({
-      changes: { from: mainRange.from, to: mainRange.to, insert: snippet },
-      selection: { anchor: mainRange.from + snippet.length },
+      changes: { from, to, insert: snippet },
+      selection: { anchor: from + snippet.length }
     });
     view.focus();
   }
 
   onMount(() => {
-    const updateListener = EditorView.updateListener.of((update) => {
-      if (update.docChanged && onChange) {
-        onChange(update.state.doc.toString());
-      }
+    const extensions = [
+      basicSetup,
+      json(),
+      EditorView.lineWrapping,
+      readonlyCompartment.of(EditorState.readOnly.of(readonly)),
+      themeCompartment.of(dark ? oneDark : []),
+      EditorView.updateListener.of((update: { docChanged: boolean; state: { doc: { toString(): string } } }) => {
+        if (update.docChanged && !readonly) {
+          onChange(update.state.doc.toString());
+        }
+      })
+    ];
+
+    view = new EditorView({
+      doc: value || '',
+      extensions,
+      parent: editorElement
     });
 
-    const state = EditorState.create({
-      doc: value,
-      extensions: [
-        basicSetup,
-        json(),
-        themeCompartment.of(dark ? oneDark : []),
-        EditorView.editable.of(!readonly),
-        updateListener,
-        EditorView.theme({
-          '&': { height: '100%', fontSize: '13px' },
-          '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', lineHeight: '1.6' },
-          '&.cm-focused': { outline: 'none' }
-        })
-      ],
-    });
-
-    view = new EditorView({ state, parent: editorElement });
-    return () => view?.destroy();
+    return () => {
+      view?.destroy();
+      view = null;
+    };
   });
 
+  // 关键：外部数据到达时实时刷新编辑器，彻底解决右侧空白
   $effect(() => {
-    if (view && value !== view.state.doc.toString()) {
+    const targetVal = value || '';
+    if (view && view.state.doc.toString() !== targetVal) {
       view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: value },
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: targetVal
+        }
       });
     }
   });
 
+  // 关键：动态响应浅色/深色主题切换，彻底消除只有编辑器是黑底的问题
   $effect(() => {
     if (view) {
       view.dispatch({
-        effects: themeCompartment.reconfigure(dark ? oneDark : [])
+        effects: [
+          themeCompartment.reconfigure(dark ? oneDark : []),
+          readonlyCompartment.reconfigure(EditorState.readOnly.of(readonly))
+        ]
       });
     }
   });
 </script>
 
-<div 
-  bind:this={editorElement} 
-  class="h-full w-full overflow-hidden rounded font-mono transition-colors"
-></div>
+<div class="h-full w-full overflow-hidden font-mono text-xs" bind:this={editorElement}></div>
+
+<style>
+  :global(.cm-editor) {
+    height: 100% !important;
+  }
+  :global(.cm-scroller) {
+    overflow: auto !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  }
+</style>

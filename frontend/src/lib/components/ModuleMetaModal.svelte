@@ -4,22 +4,25 @@
   import type { Module, Component } from '$lib/types';
   import Icon from '$lib/components/Icon.svelte';
 
+  interface Props {
+    open?: boolean;
+    editModule?: Module | null;
+    onClose?: () => void;
+    onSave?: (mod: Module) => void;
+  }
+
   let {
     open = false,
     editModule = null,
     onClose = () => {},
     onSave = () => {}
-  } = $props<{
-    open?: boolean;
-    editModule?: Module | null;
-    onClose?: () => void;
-    onSave?: (mod: Module) => void;
-  }>();
+  }: Props = $props();
 
   let id = $state('');
   let name = $state('');
   let templateId = $state('');
   let category = $state('io');
+  let tagsStr = $state('');
 
   $effect(() => {
     if (open) {
@@ -28,11 +31,13 @@
         name = editModule.name;
         templateId = editModule.template_id;
         category = editModule.category;
+        tagsStr = (editModule.tags || []).join(', ');
       } else {
         id = '';
         name = '';
         templateId = ws.components[0]?.id || '';
         category = ws.components[0]?.category || 'io';
+        tagsStr = '';
       }
     }
   });
@@ -61,6 +66,7 @@
       template_id: templateId,
       name: name.trim(),
       category: category,
+      tags: tagsStr.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
       params_json: editModule?.params_json || '{}',
       description: editModule?.description || '',
     };
@@ -76,16 +82,15 @@
           <Icon name="boxes" color="blue" size={17} />
           <span>{editModule ? '编辑积木基础属性' : '新建成品积木'}</span>
         </h3>
-        <button onclick={onClose} class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+        <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
           <Icon name="close" size={15} />
         </button>
       </div>
 
-      <!-- 纯粹的元数据表单 (无任何实参插孔) -->
       <div class="space-y-3.5 text-xs">
         <div class="grid grid-cols-2 gap-3">
           <label class="block">
-            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">成品积木 ID (唯一标识)</span>
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">成品积木 ID</span>
             <input
               bind:value={id}
               disabled={!!editModule}
@@ -106,7 +111,7 @@
 
         <div class="grid grid-cols-2 gap-3">
           <label class="block">
-            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">引用的母版 (软链接指针)</span>
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">引用的母版</span>
             <select
               bind:value={templateId}
               onchange={() => {
@@ -134,13 +139,23 @@
             </select>
           </label>
         </div>
+
+        <!-- 关键补齐：积木标签输入 -->
+        <label class="block">
+          <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">积木标签 (逗号分隔)</span>
+          <input
+            bind:value={tagsStr}
+            placeholder="例如: hk, cn2, 4k, proxy"
+            class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </label>
       </div>
 
       <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-        <button onclick={onClose} class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">
+        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">
           取消
         </button>
-        <button onclick={handleSubmit} class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">
+        <button onclick={handleSubmit} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">
           保存属性
         </button>
       </div>

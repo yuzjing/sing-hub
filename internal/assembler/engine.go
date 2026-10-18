@@ -7,6 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -15,6 +19,20 @@ import (
 	"sing-hub/internal/store"
 	"sing-hub/internal/versioning"
 )
+
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+type ValidationResult struct {
+	Version string `json:"version"`
+	Valid   bool   `json:"valid"`
+	Output  string `json:"output"`
+}
+
+type ValidationReport struct {
+	Enabled bool              `json:"enabled"`
+	Stable  *ValidationResult `json:"stable,omitempty"`
+	Alpha   *ValidationResult `json:"alpha,omitempty"`
+}
 
 type Engine struct {
 	store   *store.Store
@@ -40,7 +58,6 @@ func funcMap() template.FuncMap {
 	}
 }
 
-// unflattenParams 将类似 "_node.endpoint" 扁平键转换为嵌套结构
 func unflattenParams(raw map[string]any) map[string]any {
 	result := make(map[string]any)
 	for key, val := range raw {
@@ -61,8 +78,6 @@ func unflattenParams(raw map[string]any) map[string]any {
 	return result
 }
 
-// resolveNodeReferences 解析 @node:<node_id>.<prop> 动态引用
-// resolveNodeReferences 增强版：支持 @node:<id>.ipv4, @node:<id>.ipv6, @node:<id>.domain, @node:<id>.endpoint
 func (e *Engine) resolveNodeReferences(ctx context.Context, params map[string]any) {
 	devices, err := e.store.ListDevices(ctx)
 	if err != nil {
@@ -73,23 +88,24 @@ func (e *Engine) resolveNodeReferences(ctx context.Context, params map[string]an
 		devMap[d.ID] = d
 	}
 
-	isIPv4 := func(ip string) bool {
-		return strings.Count(ip, ".") == 3 && !strings.Contains(ip, ":")
-	}
-	isIPv6 := func(ip string) bool {
-		return strings.Contains(ip, ":")
-	}
-
 	var walk func(m map[string]any)
 	walk = func(m map[string]any) {
 		for k, v := range m {
-			if strVal, ok := v.(string); ok {
-				if strings.HasPrefix(strVal, "@node:") {
-					parts := strings.Split(strings.TrimPrefix(strVal, "@node:"), ".")
-					if len(parts) >= 2 {
-						nodeID := parts[0]
-						prop := parts[1]
-						if dev, exists := devMap[nodeID]; exists {
+			if strVal, ok := v.(string); ok && strings.HasPrefix(strVal, "@node:") {
+				parts := strings.Split(strings.TrimPrefix(strVal, "@node:"), ".")
+				if len(parts) >= 2 {
+					nodeID := parts[0]
+					prop := parts[1]
+					if dev, exists := devMap[nodeID]; exists {
+						found := false
+						for _, p := range dev.Props {
+							if p.Key == prop {
+								m[k] = p.Value
+								found = true
+								break
+							}
+						}
+						if !found {
 							switch prop {
 							case "endpoint":
 								if len(dev.Endpoints) > 0 {
@@ -97,42 +113,6 @@ func (e *Engine) resolveNodeReferences(ctx context.Context, params map[string]an
 								} else {
 									m[k] = "127.0.0.1"
 								}
-							case "ipv4":
-								found := ""
-								for _, ep := range dev.Endpoints {
-									if isIPv4(ep) {
-										found = ep
-										break
-									}
-								}
-								if found == "" && len(dev.Endpoints) > 0 {
-									found = dev.Endpoints[0]
-								}
-								m[k] = found
-							case "ipv6":
-								found := ""
-								for _, ep := range dev.Endpoints {
-									if isIPv6(ep) {
-										found = ep
-										break
-									}
-								}
-								if found == "" && len(dev.Endpoints) > 0 {
-									found = dev.Endpoints[0]
-								}
-								m[k] = found
-							case "domain":
-								found := ""
-								for _, ep := range dev.Endpoints {
-									if !isIPv4(ep) && !isIPv6(ep) {
-										found = ep
-										break
-									}
-								}
-								if found == "" && len(dev.Endpoints) > 0 {
-									found = dev.Endpoints[0]
-								}
-								m[k] = found
 							case "ssh_host":
 								m[k] = dev.SSHHost
 							case "id":
@@ -142,10 +122,6 @@ func (e *Engine) resolveNodeReferences(ctx context.Context, params map[string]an
 							}
 						}
 					}
-				} else if strings.HasPrefix(strVal, "@sec:token") {
-					m[k] = e.store.GetSetting(ctx, "git_token", "")
-				} else if strings.HasPrefix(strVal, "@net:easytier_cidr") {
-					m[k] = e.store.GetSetting(ctx, "easytier_cidr", "10.144.0.0/16")
 				}
 			} else if subMap, ok := v.(map[string]any); ok {
 				walk(subMap)
@@ -153,6 +129,83 @@ func (e *Engine) resolveNodeReferences(ctx context.Context, params map[string]an
 		}
 	}
 	walk(params)
+}
+
+func ensureDefaultParams(tmplStr string, params map[string]any) {
+	re := regexp.MustCompile(`\{\{\s*\.([a-zA-Z0-9_]+)`)
+	matches := re.FindAllStringSubmatch(tmplStr, -1)
+	for _, m := range matches {
+		if len(m) > 1 {
+			varName := m[1]
+			if !strings.HasPrefix(varName, "_") {
+				if _, exists := params[varName]; !exists {
+					params[varName] = ""
+				}
+			}
+		}
+	}
+}
+
+func (e *Engine) runSingleBinaryCheck(ctx context.Context, binPath string, configJSON []byte) (bool, string) {
+	if _, err := os.Stat(binPath); os.IsNotExist(err) {
+		return false, "内核二进制未下载或路径不存在"
+	}
+
+	tmpFile, err := os.CreateTemp("", "sing-box-check-*.json")
+	if err != nil {
+		return false, fmt.Sprintf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	_, _ = tmpFile.Write(configJSON)
+	_ = tmpFile.Close()
+
+	cmd := exec.CommandContext(ctx, binPath, "check", "-c", tmpFile.Name())
+	out, err := cmd.CombinedOutput()
+	cleanOut := ansiRegex.ReplaceAllString(string(out), "")
+	cleanOut = strings.TrimSpace(strings.ReplaceAll(cleanOut, tmpFile.Name(), "config.json"))
+
+	if err != nil {
+		return false, cleanOut
+	}
+	return true, "语法校验完美通过"
+}
+
+// ValidateDualTrack 执行双轨/单轨内核语法校验
+func (e *Engine) ValidateDualTrack(ctx context.Context, configJSON []byte) ValidationReport {
+	channel := e.store.GetSetting(ctx, "singbox_update_channel", "all")
+	enabled := e.store.GetSetting(ctx, "singbox_linter_enabled", "true") == "true"
+
+	if !enabled || channel == "disabled" {
+		return ValidationReport{Enabled: false}
+	}
+
+	binDir := os.Getenv("SINGBOX_BIN_DIR")
+	if binDir == "" {
+		dataDir := os.Getenv("DATA_DIR")
+		if dataDir == "" {
+			dataDir = "./data"
+		}
+		binDir = filepath.Join(dataDir, "bin")
+	}
+
+	report := ValidationReport{Enabled: true}
+
+	if channel == "stable" || channel == "all" {
+		p := filepath.Join(binDir, "sing-box-stable")
+		ok, msg := e.runSingleBinaryCheck(ctx, p, configJSON)
+		ver := e.store.GetSetting(ctx, "singbox_stable_ver", "Stable")
+		report.Stable = &ValidationResult{Version: ver, Valid: ok, Output: msg}
+	}
+
+	if channel == "alpha" || channel == "all" {
+		p := filepath.Join(binDir, "sing-box-alpha")
+		ok, msg := e.runSingleBinaryCheck(ctx, p, configJSON)
+		ver := e.store.GetSetting(ctx, "singbox_alpha_ver", "Alpha")
+		report.Alpha = &ValidationResult{Version: ver, Valid: ok, Output: msg}
+	}
+
+	return report
 }
 
 func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSON string) (string, error) {
@@ -167,24 +220,21 @@ func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSO
 
 	params := unflattenParams(rawParams)
 	e.resolveNodeReferences(ctx, params)
+	ensureDefaultParams(tmplStr, params)
 
-	// 注入默认上下文，防止留空时模板崩溃
 	nodeMap, ok := params["_node"].(map[string]any)
 	if !ok {
 		nodeMap = make(map[string]any)
 		params["_node"] = nodeMap
 	}
-	if _, ok := nodeMap["id"]; !ok {
+	if _, ok := nodeMap["id"]; !ok || nodeMap["id"] == "" {
 		nodeMap["id"] = "mock-node"
 	}
-	if _, ok := nodeMap["name"]; !ok {
+	if _, ok := nodeMap["name"]; !ok || nodeMap["name"] == "" {
 		nodeMap["name"] = "测试节点"
 	}
-	if _, ok := nodeMap["endpoint"]; !ok {
+	if _, ok := nodeMap["endpoint"]; !ok || nodeMap["endpoint"] == "" {
 		nodeMap["endpoint"] = "10.123.123.1"
-	}
-	if _, ok := nodeMap["ssh_host"]; !ok {
-		nodeMap["ssh_host"] = "10.123.123.1"
 	}
 
 	if _, ok := params["_net"]; !ok {
@@ -199,7 +249,7 @@ func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSO
 
 	tmpl, err := template.New("preview").Funcs(funcMap()).Parse(tmplStr)
 	if err != nil {
-		return "", fmt.Errorf("模板解析错误: %w", err)
+		return "", fmt.Errorf("模板语法错误: %w", err)
 	}
 
 	var buf bytes.Buffer
@@ -216,18 +266,18 @@ func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSO
 	return string(pretty), nil
 }
 
-func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string, error) {
+func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string, ValidationReport, error) {
 	start := time.Now()
 	slog.Info("assembling profile from modules", "profile_id", profileID)
 
 	profile, err := e.store.GetProfile(ctx, profileID)
 	if err != nil {
-		return nil, "", fmt.Errorf("get profile failed: %w", err)
+		return nil, "", ValidationReport{}, fmt.Errorf("获取方案失败: %w", err)
 	}
 
 	resolvedModules, err := e.store.GetResolvedProfileModules(ctx, profileID)
 	if err != nil {
-		return nil, "", fmt.Errorf("load resolved modules failed: %w", err)
+		return nil, "", ValidationReport{}, fmt.Errorf("加载积木依赖失败: %w", err)
 	}
 
 	var associatedDevice *model.Device
@@ -249,68 +299,63 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 
 		params := unflattenParams(rawParams)
 		e.resolveNodeReferences(ctx, params)
+		ensureDefaultParams(item.Template.PayloadTmpl, params)
 
-		params["_profile"] = map[string]any{
-			"id":      profile.ID,
-			"name":    profile.Name,
-			"token":   profile.Token,
-			"version": profile.SingBoxVersion,
+		params["_profile"] = map[string]any{"id": profile.ID, "name": profile.Name, "token": profile.Token, "version": profile.SingBoxVersion}
+
+		nodeMap, ok := params["_node"].(map[string]any)
+		if !ok {
+			nodeMap = make(map[string]any)
+			params["_node"] = nodeMap
 		}
 
-		params["_net"] = map[string]any{
-			"easytier_cidr": e.store.GetSetting(ctx, "easytier_cidr", "10.144.0.0/16"),
-		}
-
-		params["_sec"] = map[string]any{
-			"uuid":     profile.Token,
-			"password": profile.Token,
-		}
-
-		if associatedDevice != nil {
-			primaryEP := ""
-			if len(associatedDevice.Endpoints) > 0 {
-				primaryEP = associatedDevice.Endpoints[0]
+		if val, exists := nodeMap["endpoint"]; !exists || val == "" {
+			if associatedDevice != nil && len(associatedDevice.Endpoints) > 0 {
+				nodeMap["endpoint"] = associatedDevice.Endpoints[0]
+			} else {
+				nodeMap["endpoint"] = "127.0.0.1"
 			}
-			params["_node"] = map[string]any{
-				"id":       associatedDevice.ID,
-				"name":     associatedDevice.Name,
-				"endpoint": primaryEP,
-				"ssh_host": associatedDevice.SSHHost,
-				"tags":     associatedDevice.Tags,
+		}
+
+		if val, exists := nodeMap["id"]; !exists || val == "" {
+			if associatedDevice != nil {
+				nodeMap["id"] = associatedDevice.ID
+			} else {
+				nodeMap["id"] = "unassigned"
 			}
-		} else {
-			params["_node"] = map[string]any{
-				"id":       "unassigned",
-				"name":     "未关联节点",
-				"endpoint": "127.0.0.1",
-				"ssh_host": "127.0.0.1",
-				"tags":     []string{},
+		}
+
+		if val, exists := nodeMap["name"]; !exists || val == "" {
+			if associatedDevice != nil {
+				nodeMap["name"] = associatedDevice.Name
+			} else {
+				nodeMap["name"] = "默认节点"
 			}
 		}
 
 		tmpl, err := template.New(item.Module.ID).Funcs(funcMap()).Parse(item.Template.PayloadTmpl)
 		if err != nil {
-			return nil, "", fmt.Errorf("积木 [%s] 语法错误: %w", item.Module.Name, err)
+			return nil, "", ValidationReport{}, fmt.Errorf("积木 [%s] 语法错误: %w", item.Module.Name, err)
 		}
 
 		var rendered bytes.Buffer
 		if err := tmpl.Execute(&rendered, params); err != nil {
-			return nil, "", fmt.Errorf("积木 [%s] 渲染错误: %w", item.Module.Name, err)
+			return nil, "", ValidationReport{}, fmt.Errorf("积木 [%s] 渲染错误: %w", item.Module.Name, err)
 		}
 
 		var chunk any
 		if err := json.Unmarshal(rendered.Bytes(), &chunk); err != nil {
-			return nil, "", fmt.Errorf("积木 [%s] 产生非法 JSON: %w\n%s", item.Module.Name, err, rendered.String())
+			return nil, "", ValidationReport{}, fmt.Errorf("积木 [%s] 产生非法 JSON: %w\n%s", item.Module.Name, err, rendered.String())
 		}
 
 		if err := mount(root, item.Template.MountPath, item.Template.Strategy, chunk); err != nil {
-			return nil, "", fmt.Errorf("装配积木 [%s] 失败: %w", item.Module.Name, err)
+			return nil, "", ValidationReport{}, fmt.Errorf("装配积木 [%s] 失败: %w", item.Module.Name, err)
 		}
 	}
 
 	finalJSON, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
-		return nil, "", err
+		return nil, "", ValidationReport{}, err
 	}
 
 	var commitHash string
@@ -319,13 +364,12 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 		commitHash, _ = e.gitRepo.CommitSnapshot(profileID, finalJSON, sqlDump)
 	}
 
-	slog.Info("profile assembly finished",
-		"profile_id", profileID,
-		"duration_ms", time.Since(start).Milliseconds(),
-		"size_bytes", len(finalJSON),
-	)
+	// 执行双轨校验，返回结构化报告
+	report := e.ValidateDualTrack(ctx, finalJSON)
 
-	return finalJSON, commitHash, nil
+	slog.Info("profile assembly finished", "profile", profileID, "duration_ms", time.Since(start).Milliseconds())
+
+	return finalJSON, commitHash, report, nil
 }
 
 func mount(root map[string]any, mountPath string, strategy model.Strategy, chunk any) error {

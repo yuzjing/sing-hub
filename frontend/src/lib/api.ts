@@ -6,6 +6,8 @@ import type {
   Device,
   CommitRecord,
   NodePingReport,
+  UpdaterStatus,
+  ValidationReport,
 } from './types';
 
 class ApiClient {
@@ -133,10 +135,32 @@ class ApiClient {
     });
   }
 
-  async compileProfile(id: string): Promise<{ json: string; commitHash: string }> {
-    return this.request<{ json: string; commitHash: string }>(`/api/profiles/${id}/compile`, {
+  async compileProfile(id: string): Promise<{ json: string; commitHash: string; validation?: ValidationReport }> {
+    const res = await fetch(`/api/profiles/${id}/compile`, {
       method: 'POST',
     });
+    if (!res.ok) {
+      let errMsg = `编译失败: HTTP ${res.status}`;
+      try {
+        const errObj = await res.json();
+        if (errObj && errObj.error) errMsg = errObj.error;
+      } catch {}
+      throw new Error(errMsg);
+    }
+    const data = await res.json();
+    return {
+      json: data.json,
+      commitHash: data.commit_hash || '',
+      validation: data.validation,
+    };
+  }
+
+  async getUpdaterStatus(): Promise<UpdaterStatus> {
+    return this.request<UpdaterStatus>('/api/system/updater');
+  }
+
+  async triggerUpdate(): Promise<void> {
+    return this.request<void>('/api/system/updater/trigger', { method: 'POST' });
   }
 
   async getHistory(profileId: string): Promise<CommitRecord[]> {
@@ -211,6 +235,8 @@ class ApiClient {
     });
   }
 
+  
+
   async getLogLevel(): Promise<{ level: string }> {
     return this.request<{ level: string }>('/api/settings/loglevel');
   }
@@ -238,6 +264,8 @@ class ApiClient {
       body: JSON.stringify({ path }),
     });
   }
+
+  
 }
 
 export const api = new ApiClient();

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="hubGrad" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3b82f6"/>
+      <stop offset="0.5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#ec4899"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="#09090b"/>
+  <!-- 现代多维拓扑晶格 -->
+  <path d="M16 5L26 10.5V21.5L16 27L6 21.5V10.5L16 5Z" stroke="url(#hubGrad)" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="16" cy="16" r="3.5" fill="url(#hubGrad)"/>
+  <path d="M16 5V12.5M26 21.5L19.5 17.8M6 21.5L12.5 17.8" stroke="url(#hubGrad)" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

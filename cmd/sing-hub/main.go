@@ -15,6 +15,7 @@ import (
 	"sing-hub/internal/config"
 	"sing-hub/internal/server"
 	"sing-hub/internal/store"
+	"sing-hub/internal/updater" // 必须引入 updater 模块
 	"sing-hub/internal/versioning"
 )
 
@@ -60,8 +61,13 @@ func main() {
 	}
 
 	eng := assembler.New(s, gitRepo)
-	// 关键：将 dbPath 作为参数传入 server.New
-	srv := server.New(s, eng, gitRepo, dbPath, logLevel)
+
+	// 关键修复：实例化 Updater 引擎，并启动后台热更定时任务
+	upd := updater.New(s)
+	upd.StartPeriodicTask()
+
+	// 将 updater 作为第 4 个参数传入 Server
+	srv := server.New(s, eng, gitRepo, upd, dbPath, logLevel)
 
 	httpServer := &http.Server{
 		Addr:    cfg.Server.Listen,

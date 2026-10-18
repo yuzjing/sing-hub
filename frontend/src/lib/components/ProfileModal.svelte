@@ -1,131 +1,167 @@
 <!-- frontend/src/lib/components/ProfileModal.svelte -->
 <script lang="ts">
+  import { ws } from '$lib/workspace.svelte';
   import type { Profile } from '$lib/types';
+  import Icon from '$lib/components/Icon.svelte';
 
-  let {
-    open = false,
-    editProfile = null,
-    onClose,
-    onSave,
-  }: {
-    open: boolean;
+  interface Props {
+    open?: boolean;
     editProfile?: Profile | null;
-    onClose: () => void;
-    onSave: (p: {
+    onClose?: () => void;
+    onSave?: (data: {
       id: string;
       name: string;
       token: string;
+      tags: string[];
       description: string;
       sing_box_version: string;
       enable_subscribe: boolean;
       enable_ping: boolean;
       enable_push: boolean;
     }) => void;
-  } = $props();
+  }
+
+  let {
+    open = false,
+    editProfile = null,
+    onClose = () => {},
+    onSave = () => {}
+  }: Props = $props();
 
   let id = $state('');
   let name = $state('');
   let token = $state('');
+  let tagsStr = $state('');
   let description = $state('');
-  let singBoxVersion = $state('1.11.0');
-  let enableSub = $state(true);
+  let singBoxVersion = $state('1.10.0');
+  let enableSubscribe = $state(true);
   let enablePing = $state(true);
-  let enablePush = $state(false);
+  let enablePush = $state(true);
 
   $effect(() => {
-    if (editProfile) {
-      id = editProfile.id;
-      name = editProfile.name;
-      token = editProfile.token;
-      description = editProfile.description || '';
-      singBoxVersion = editProfile.sing_box_version || '1.11.0';
-      enableSub = editProfile.capabilities?.enable_subscribe ?? true;
-      enablePing = editProfile.capabilities?.enable_ping ?? true;
-      enablePush = editProfile.capabilities?.enable_push ?? false;
-    } else {
-      id = '';
-      name = '';
-      token = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
-      description = '';
-      singBoxVersion = '1.11.0';
-      enableSub = true;
-      enablePing = true;
-      enablePush = false;
+    if (open) {
+      if (editProfile) {
+        id = editProfile.id;
+        name = editProfile.name;
+        token = editProfile.token;
+        tagsStr = (editProfile.tags || []).join(', ');
+        description = editProfile.description;
+        singBoxVersion = editProfile.sing_box_version || '1.10.0';
+        enableSubscribe = editProfile.capabilities?.enable_subscribe ?? true;
+        enablePing = editProfile.capabilities?.enable_ping ?? true;
+        enablePush = editProfile.capabilities?.enable_push ?? true;
+      } else {
+        id = 'prof-' + Date.now().toString(36);
+        name = '';
+        token = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+        tagsStr = 'default';
+        description = '';
+        singBoxVersion = '1.10.0';
+        enableSubscribe = true;
+        enablePing = true;
+        enablePush = true;
+      }
     }
   });
 
-  const VERSION_CAPSULES = ['1.12.x', '1.11.x', '1.10.x'];
+  function handleSubmit() {
+    if (!name.trim()) {
+      ws.showToast('请输入方案名称', 'error');
+      return;
+    }
+    onSave({
+      id: id || ('prof-' + Date.now().toString(36)),
+      name: name.trim(),
+      token: token.trim(),
+      tags: tagsStr.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
+      description: description.trim(),
+      sing_box_version: singBoxVersion,
+      enable_subscribe: enableSubscribe,
+      enable_ping: enablePing,
+      enable_push: enablePush,
+    });
+  }
 </script>
 
 {#if open}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div class="w-96 rounded-xl border border-zinc-200 bg-white p-5 space-y-4 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 text-xs">
-      <h3 class="text-sm font-bold text-zinc-900 dark:text-white">
-        {editProfile ? '编辑方案元数据' : '新建方案配方 (Profile)'}
-      </h3>
-      <div class="space-y-3">
-        <label class="block">
-          <span class="mb-1 block text-zinc-500">方案唯一标识 (ID)</span>
-          <input
-            disabled={!!editProfile}
-            bind:value={id}
-            placeholder="prod-streaming"
-            class="w-full rounded border border-zinc-300 bg-white px-2.5 py-1.5 font-mono dark:border-zinc-700 dark:bg-zinc-950 disabled:opacity-50"
-          />
-        </label>
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+    <div class="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 space-y-4">
+      <div class="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
+        <h3 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+          <Icon name="layers" color="amber" size={17} />
+          <span>{editProfile ? '编辑方案元数据' : '新建方案配方'}</span>
+        </h3>
+        <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+          <Icon name="close" size={15} />
+        </button>
+      </div>
 
-        <label class="block">
-          <span class="mb-1 block text-zinc-500">方案名称</span>
-          <input bind:value={name} placeholder="通用串流与组网方案" class="w-full rounded border border-zinc-300 bg-white px-2.5 py-1.5 dark:border-zinc-700 dark:bg-zinc-950" />
-        </label>
+      <div class="space-y-3.5 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">方案名称</span>
+            <input
+              bind:value={name}
+              placeholder="如: 全网分流出海方案"
+              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
 
-        <!-- 目标 sing-box 内核版本选用 -->
-        <label class="block">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-zinc-500">适配内核版本 (sing-box version)</span>
-            <div class="flex gap-1">
-              {#each VERSION_CAPSULES as ver}
-                <button
-                  type="button"
-                  onclick={() => (singBoxVersion = ver.replace('.x', '.0'))}
-                  class="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.2 text-[10px] text-zinc-600 dark:text-zinc-400 hover:text-blue-500 font-mono"
-                >
-                  {ver}
-                </button>
-              {/each}
-            </div>
+          <!-- 关键补齐：方案标签输入 -->
+          <label class="block">
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">方案标签 (逗号分隔)</span>
+            <input
+              bind:value={tagsStr}
+              placeholder="如: prod, home, vps"
+              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">订阅安全 Token</span>
+            <input
+              bind:value={token}
+              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+
+          <label class="block">
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">目标 Sing-box 版本</span>
+            <input
+              bind:value={singBoxVersion}
+              placeholder="1.10.0"
+              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </label>
+        </div>
+
+        <div class="border-t border-zinc-100 pt-3 dark:border-zinc-800 space-y-2">
+          <span class="block font-medium text-zinc-700 dark:text-zinc-300">方案能力开关</span>
+          <div class="flex items-center gap-4">
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" bind:checked={enableSubscribe} class="rounded" />
+              <span>允许订阅</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" bind:checked={enablePing} class="rounded" />
+              <span>允许测活</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" bind:checked={enablePush} class="rounded" />
+              <span>允许推送</span>
+            </label>
           </div>
-          <input bind:value={singBoxVersion} placeholder="1.11.0" class="w-full rounded border border-zinc-300 bg-white px-2.5 py-1.5 font-mono dark:border-zinc-700 dark:bg-zinc-950" />
-        </label>
-
-        <div class="space-y-1.5 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" bind:checked={enableSub} />
-            <span>开启客户端订阅端点 (/sub/{token || 'token'})</span>
-          </label>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" bind:checked={enablePing} />
-            <span>开启节点握手延迟探测</span>
-          </label>
         </div>
       </div>
 
-      <div class="flex justify-end gap-2 pt-2">
-        <button onclick={onClose} class="rounded px-3 py-1.5 text-zinc-400 hover:text-white cursor-pointer">取消</button>
-        <button
-          onclick={() => onSave({
-            id,
-            name,
-            token,
-            description,
-            sing_box_version: singBoxVersion,
-            enable_subscribe: enableSub,
-            enable_ping: enablePing,
-            enable_push: enablePush,
-          })}
-          class="rounded bg-blue-600 px-4 py-1.5 font-medium text-white hover:bg-blue-500 cursor-pointer"
-        >
-          {editProfile ? '保存修改' : '创建方案'}
+      <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">
+          取消
+        </button>
+        <button onclick={handleSubmit} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">
+          保存方案
         </button>
       </div>
     </div>

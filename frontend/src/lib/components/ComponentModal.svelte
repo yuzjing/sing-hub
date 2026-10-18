@@ -4,17 +4,19 @@
   import Icon from '$lib/components/Icon.svelte';
   import { ws } from '$lib/workspace.svelte';
 
+  interface Props {
+    open?: boolean;
+    editComponent?: Component | null;
+    onClose?: () => void;
+    onSave?: (comp: Component) => void;
+  }
+
   let {
     open = false,
     editComponent = null,
     onClose = () => {},
     onSave = () => {}
-  } = $props<{
-    open?: boolean;
-    editComponent?: Component | null;
-    onClose?: () => void;
-    onSave?: (comp: Component) => void;
-  }>();
+  }: Props = $props();
 
   let id = $state('');
   let name = $state('');
@@ -89,7 +91,7 @@
           <Icon name="sliders" color="emerald" size={17} />
           <span>{editComponent ? '编辑语法母版元数据' : '新建语法母版 (Template)'}</span>
         </h3>
-        <button onclick={onClose} class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+        <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
           <Icon name="close" size={15} />
         </button>
       </div>
@@ -147,8 +149,8 @@
       </div>
 
       <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-        <button onclick={onClose} class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">取消</button>
-        <button onclick={handleSubmit} class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">保存母版元数据</button>
+        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">取消</button>
+        <button onclick={handleSubmit} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">保存母版元数据</button>
       </div>
     </div>
   </div>

@@ -18,6 +18,7 @@ export interface Module {
   template_id: string;
   name: string;
   category: string;
+  tags?: string[]; // 补齐积木标签
   params_json: string;
   description: string;
   updated_at?: string;
@@ -41,6 +42,7 @@ export interface Profile {
   id: string;
   name: string;
   token: string;
+  tags?: string[]; // 补齐方案标签
   description: string;
   sing_box_version: string;
   capabilities: ProfileCapabilities;
@@ -48,10 +50,17 @@ export interface Profile {
   updated_at?: string;
 }
 
+export interface DeviceProp {
+  key: string;
+  label: string;
+  value: string;
+}
+
 export interface Device {
   id: string;
   name: string;
   endpoints: string[];
+  props?: DeviceProp[];
   ssh_host: string;
   target_profile_id: string;
   auth_type: string;
@@ -76,7 +85,28 @@ export interface CommitRecord {
 
 export interface NodePingReport {
   device_id: string;
+  endpoint: string;
   online: boolean;
   latency_ms: number;
   error?: string;
+}
+
+export interface UpdaterStatus {
+  is_running: boolean;
+  stable_version: string;
+  alpha_version: string;
+  last_check: string;
+  last_error: string;
+}
+
+export interface ValidationResult {
+  version: string;
+  valid: boolean;
+  output: string;
+}
+
+export interface ValidationReport {
+  enabled: boolean;
+  stable?: ValidationResult;
+  alpha?: ValidationResult;
 }

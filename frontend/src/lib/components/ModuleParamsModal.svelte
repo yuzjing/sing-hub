@@ -4,17 +4,19 @@
   import type { Module, Component } from '$lib/types';
   import Icon from '$lib/components/Icon.svelte';
 
+  interface Props {
+    open?: boolean;
+    module?: Module | null;
+    onClose?: () => void;
+    onSave?: (mod: Module) => void;
+  }
+
   let {
     open = false,
     module = null,
     onClose = () => {},
     onSave = () => {}
-  } = $props<{
-    open?: boolean;
-    module?: Module | null;
-    onClose?: () => void;
-    onSave?: (mod: Module) => void;
-  }>();
+  }: Props = $props();
 
   let paramValues = $state<Record<string, string | number | boolean>>({});
 
@@ -23,7 +25,6 @@
     return ws.components.find((c: Component) => c.id === module.template_id) || null;
   });
 
-  // 始终由母版模板提取插孔
   let templateVars = $derived.by(() => {
     if (!targetTmpl) return [];
     const matches = targetTmpl.payload_tmpl.matchAll(/\{\{\s*\.([a-zA-Z0-9_.]+)(?:\s*\|[^}]+)?\s*\}\}/g);
@@ -67,12 +68,11 @@
             母版: {targetTmpl?.name || module.template_id} [{targetTmpl?.mount_path || 'path'}]
           </span>
         </div>
-        <button onclick={onClose} class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+        <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
           <Icon name="close" size={15} />
         </button>
       </div>
 
-      <!-- 纯粹的插孔实参赋值表单 -->
       <div class="space-y-3">
         {#if templateVars.length === 0}
           <div class="py-8 text-center text-xs text-zinc-400 italic">
@@ -103,10 +103,10 @@
       </div>
 
       <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-        <button onclick={onClose} class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">
+        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">
           取消
         </button>
-        <button onclick={handleSave} class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">
+        <button onclick={handleSave} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">
           应用实参
         </button>
       </div>

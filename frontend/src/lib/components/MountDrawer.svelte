@@ -4,10 +4,15 @@
   import type { Module } from '$lib/types';
   import Icon from '$lib/components/Icon.svelte';
 
-  let { open = false, onClose = () => {} } = $props<{ open?: boolean; onClose?: () => void }>();
+  interface Props {
+    open?: boolean;
+    onClose?: () => void;
+  }
+
+  let { open = false, onClose = () => {} }: Props = $props();
 
   let searchText = $state('');
-  let selectedCategory = $state<string>('all');
+  let selectedCategory = $state('all');
 
   const CATEGORIES = [
     { key: 'all', title: '全部' },
@@ -17,9 +22,8 @@
     { key: 'system', title: '系统基础 (System)' }
   ];
 
-  // 当前方案已经挂载的所有 module_id 集合
   let mountedModuleIds = $derived.by(() => {
-    return new Set((ws.activeProfile?.modules || []).map(b => b.module_id));
+    return new Set((ws.activeProfile?.modules || []).map((b: { module_id: string }) => b.module_id));
   });
 
   let filteredModules = $derived.by(() => {
@@ -35,7 +39,7 @@
   async function handleMount(m: Module) {
     if (mountedModuleIds.has(m.id)) return;
     await ws.attachModules([m.id]);
-    ws.showToast(`已装配成品积木 [${m.name}] ✓`, 'success');
+    ws.showToast('已装配成品积木 [' + m.name + '] ✓', 'success');
   }
 </script>
 
@@ -51,7 +55,7 @@
           </h2>
           <span class="text-[11px] text-zinc-400">正在配给方案: <strong>{ws.activeProfile?.name || '-'}</strong></span>
         </div>
-        <button onclick={onClose} class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+        <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
           <Icon name="close" size={16} />
         </button>
       </div>
@@ -67,6 +71,7 @@
           {#each CATEGORIES as cat (cat.key)}
             <button
               onclick={() => selectedCategory = cat.key}
+              type="button"
               class="px-2 py-0.5 rounded-md text-[11px] font-medium transition cursor-pointer {selectedCategory === cat.key ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200'}"
             >
               {cat.title}
@@ -101,6 +106,7 @@
               {:else}
                 <button
                   onclick={() => handleMount(mod)}
+                  type="button"
                   class="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition flex items-center gap-1"
                 >
                   <Icon name="plus" size={13} />
@@ -113,7 +119,7 @@
       </div>
 
       <div class="border-t border-zinc-200 p-3 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 flex justify-end">
-        <button onclick={onClose} class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
+        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
           完成
         </button>
       </div>

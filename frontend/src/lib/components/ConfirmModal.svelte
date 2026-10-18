@@ -2,6 +2,15 @@
 <script lang="ts">
   import Icon from '$lib/components/Icon.svelte';
 
+  interface Props {
+    open?: boolean;
+    title?: string;
+    content?: string;
+    actionType?: 'danger' | 'primary';
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }
+
   let {
     open = false,
     title = '确认此操作？',
@@ -9,14 +18,7 @@
     actionType = 'danger',
     onConfirm = () => {},
     onCancel = () => {},
-  } = $props<{
-    open?: boolean;
-    title?: string;
-    content?: string;
-    actionType?: 'danger' | 'primary';
-    onConfirm?: () => void;
-    onCancel?: () => void;
-  }>();
+  }: Props = $props();
 </script>
 
 {#if open}
@@ -35,12 +37,14 @@
       <div class="flex items-center justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800/80">
         <button
           onclick={onCancel}
+          type="button"
           class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/60 transition cursor-pointer shadow-2xs"
         >
           取消
         </button>
         <button
           onclick={onConfirm}
+          type="button"
           class="rounded-lg px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition cursor-pointer {actionType === 'danger' ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20'}"
         >
           确认
