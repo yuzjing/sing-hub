@@ -1,10 +1,12 @@
 <!-- frontend/src/lib/components/workspaces/FleetWorkspace.svelte -->
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
   import { ws } from '$lib/workspace.svelte';
   import { api } from '$lib/api';
-  import type { Device, DeviceProp } from '$lib/types';
+  import type { Device } from '$lib/types';
   import Icon from '$lib/components/Icon.svelte';
   import TagFilter from '$lib/components/TagFilter.svelte';
+  import DeployModal from '$lib/components/DeployModal.svelte';
 
   interface Props {
     isDeviceManageMode?: boolean;
@@ -28,8 +30,13 @@
   let expandedPropDevIds = $state<string[]>([]);
   let selectedFilterTags = $state<string[]>([]);
 
+  let deployLogs = $state('');
+  let deployStatus = $state<'running'|'success'|'error'>('running');
+  let showDeployModal = $state(false);
+
   let availableTags = $derived.by(() => {
-    const tags = new Set<string>();
+    // 修复：Svelte 5 推荐使用 SvelteSet 追踪状态
+    const tags = new SvelteSet<string>();
     ws.devices.forEach((d: Device) => {
       (d.tags || []).forEach((t: string) => tags.add(t));
     });
@@ -57,11 +64,20 @@
   async function handleDeploy(dev: Device) {
     if (!dev.enable_push || !dev.target_profile_id) return;
     isDeployingId = dev.id;
+    deployLogs = '';
+    deployStatus = 'running';
+    showDeployModal = true;
     try {
       const res = await api.deployDevice(dev.id);
-      ws.showToast('推送成功！校验哈希: ' + res.verified_hash.slice(0, 8) + ' ✓', 'success');
+      deployLogs = res.logs + `\n\n[✔] 推送与重载成功\n[i] 远端内核: ${res.remote_version}\n[i] 最终哈希: ${res.verified_hash}`;
+      deployStatus = 'success';
+      ws.showToast('推送部署成功 ✓', 'success');
     } catch (e: unknown) {
-      ws.showToast(e instanceof Error ? e.message : '推送失败', 'error');
+      // 修复：严谨捕捉抛出的包含 logs 的抛出对象，不再使用 any
+      const err = e as { message?: string; logs?: string };
+      deployLogs = (err.logs || '') + `\n\n[✖] 部署过程中断: ${err.message || '未知错误'}`;
+      deployStatus = 'error';
+      ws.showToast(err.message || '推送失败', 'error');
     } finally {
       isDeployingId = '';
     }
@@ -77,14 +93,13 @@
     editingPathDevId = '';
   }
 
-  // 优雅的 DOM 焦点获取动作 (彻底消除 a11y_autofocus 警告)
   function focusEl(node: HTMLInputElement) {
     node.focus();
   }
 </script>
 
 <div class="flex flex-1 flex-col min-h-0 overflow-hidden">
-  <!-- 次级指标与对齐基准栏 -->
+  <!-- 指标与控制头 -->
   <div class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6 dark:border-zinc-800 dark:bg-zinc-950">
     <div class="flex items-center gap-5 text-sm">
       <span class="text-zinc-500 font-bold tracking-wide">集群指标:</span>
@@ -102,7 +117,6 @@
       </span>
     </div>
 
-    <!-- 节点标签筛选器嵌入 -->
     <div class="flex items-center gap-4">
       <div class="w-64">
         <TagFilter {availableTags} bind:selectedTags={selectedFilterTags} borderless={true} />
@@ -113,7 +127,6 @@
     </div>
   </div>
 
-  <!-- 卡片主网格 -->
   <div class="flex-1 overflow-y-auto p-6 max-w-7xl mx-auto w-full space-y-5">
     {#if filteredDevices.length === 0}
       <div class="flex h-96 flex-col items-center justify-center rounded-3xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-800 bg-white/50 dark:bg-zinc-950/50">
@@ -193,18 +206,33 @@
                     <button title="克隆节点" onclick={() => onCloneDevice(dev)} type="button" class="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 transition cursor-pointer">
                       <Icon name="copy" size={15} />
                     </button>
-                    <button title="编辑元属性" onclick={() => onEditDevice(dev)} type="button" class="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 transition cursor-pointer">
+                    <button title="编辑节点" onclick={() => onEditDevice(dev)} type="button" class="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 transition cursor-pointer">
                       <Icon name="pencil" size={15} />
                     </button>
-                    <button title="删除节点" onclick={() => triggerConfirm('移除网络节点？', `将从系统中移除 [${dev.name}]。`, () => ws.batchDeleteDevices([dev.id]))} type="button" class="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-rose-600 transition cursor-pointer">
+                    <button title="删除节点" onclick={() => triggerConfirm('移除网络节点？', '将从系统中移除 [' + dev.name + ']。', () => ws.batchDeleteDevices([dev.id]))} type="button" class="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-rose-600 transition cursor-pointer">
                       <Icon name="trash" size={15} />
                     </button>
                   </div>
                 </div>
               </div>
 
-              <!-- 面板详情核心重构 -->
+              <!-- 卡片主体：运行环境、属性与目标 -->
               <div class="rounded-2xl bg-zinc-50/70 p-4 dark:bg-zinc-950/50 border border-zinc-200/60 dark:border-zinc-800/80 space-y-4">
+                
+                <div class="flex items-center justify-between border-b border-zinc-200/60 dark:border-zinc-800/80 pb-2.5">
+                  <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 font-bold text-[10px] font-mono border border-blue-200 dark:border-blue-800/50 uppercase">
+                      {dev.deploy_strategy || 'systemd'}
+                    </span>
+                    <span class="font-mono text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+                      {dev.service_name || 'sing-box'}
+                    </span>
+                  </div>
+                  {#if dev.deploy_strategy === 'standalone'}
+                    <span class="text-[10px] text-amber-600 font-semibold bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md dark:bg-amber-950/40 dark:border-amber-900/50">仅下发不重启</span>
+                  {/if}
+                </div>
+
                 <div>
                   <div class="flex items-center justify-between mb-2">
                     <span class="text-zinc-500 font-bold text-xs uppercase tracking-wider">端点与网络属性 ({allProps.length})</span>
@@ -220,7 +248,8 @@
                   </div>
 
                   <div class="space-y-1.5">
-                    {#each visibleProps as p}
+                    <!-- 修复：补齐 key -->
+                    {#each visibleProps as p (p.key)}
                       <div class="flex items-center justify-between font-mono text-xs bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-2xs hover:border-blue-300 transition">
                         <span class="text-zinc-500 font-medium truncate max-w-[40%]">{p.label || p.key}:</span>
                         <span class="text-zinc-900 dark:text-zinc-100 font-bold truncate max-w-[55%]">{p.value}</span>
@@ -243,7 +272,7 @@
                         type="button"
                         class="w-full text-left rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-400 hover:border-amber-400 transition flex items-center justify-between shadow-2xs cursor-pointer"
                       >
-                        <span class="truncate">{ws.profiles.find((p: { id: string }) => p.id === dev.target_profile_id)?.name || dev.target_profile_id}</span>
+                        <span class="truncate">{ws.profiles.find(p => p.id === dev.target_profile_id)?.name || dev.target_profile_id}</span>
                         <Icon name="layers" size={13} class="shrink-0" />
                       </button>
                     {:else}
@@ -254,7 +283,7 @@
                   <div class="space-y-1.5">
                     <span class="text-zinc-500 font-bold text-xs uppercase tracking-wider block">SSH 部署凭据</span>
                     {#if dev.ssh_host || dev.endpoints.length > 0}
-                      <div class="w-full rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs font-mono font-bold text-zinc-800 dark:text-zinc-300 shadow-2xs truncate">
+                      <div class="w-full rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs font-mono font-bold text-zinc-800 dark:text-zinc-300 shadow-2xs truncate" title="{dev.ssh_user}@{dev.ssh_host || dev.endpoints[0]}:{dev.ssh_port}">
                         {dev.ssh_user}@{dev.ssh_host || dev.endpoints[0]}:{dev.ssh_port}
                       </div>
                     {:else}
@@ -265,8 +294,8 @@
               </div>
             </div>
 
-            <!-- 卡片底部极客运维栏 (采用 use:focusEl) -->
-            <div class="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800/80">
+            <!-- 卡片底部极客运维栏 -->
+            <div class="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800/80 shrink-0">
               <div class="flex items-center gap-2 flex-1 min-w-0 mr-4">
                 <Icon name="terminal" size={14} class="text-zinc-400 shrink-0" />
                 {#if editingPathDevId === dev.id}
@@ -281,7 +310,7 @@
                   <button
                     onclick={() => { editingPathDevId = dev.id; tempRemotePath = dev.remote_path; }}
                     type="button"
-                    title="点击直接修改远程配置下发路径"
+                    title="点击修改配置文件下发路径"
                     class="text-xs text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 font-mono font-medium truncate text-left cursor-pointer flex items-center gap-1.5 transition"
                   >
                     <span class="truncate">{dev.remote_path || '~/.config/sing-box/config.json'}</span>
@@ -312,3 +341,11 @@
     {/if}
   </div>
 </div>
+
+<DeployModal
+  open={showDeployModal}
+  deviceName={ws.devices.find((d: Device) => d.id === isDeployingId)?.name || ''}
+  logs={deployLogs}
+  status={deployStatus}
+  onClose={() => showDeployModal = false}
+/>

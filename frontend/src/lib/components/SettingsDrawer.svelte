@@ -83,7 +83,7 @@
             </div>
             <label class="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" bind:checked={linterEnabled} class="sr-only peer" />
-              <div class="w-10 h-5.5 bg-zinc-200 peer-focus:outline-none rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:bg-blue-600"></div>
+              <div class="w-10 h-5.5 bg-zinc-200 peer-focus:outline-none rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
           </div>
 
@@ -125,7 +125,7 @@
                   <div>Alpha: <strong class="text-blue-950 dark:text-blue-200">{ws.updaterStatus?.alpha_version || '-'}</strong></div>
                   <div class="col-span-2 text-zinc-500 text-[11px]">上次检查: {ws.updaterStatus?.last_check || '-'}</div>
                   {#if ws.updaterStatus?.last_error}
-                    <div class="col-span-2 text-rose-500 break-words mt-1">{ws.updaterStatus.last_error}</div>
+                    <div class="col-span-2 text-rose-500 wrap-break-word mt-1">{ws.updaterStatus.last_error}</div>
                   {/if}
                 </div>
               </div>

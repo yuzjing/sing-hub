@@ -11,15 +11,16 @@ const (
 )
 
 type Component struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Category    string    `json:"category"`
-	ScopeTag    string    `json:"scope_tag"`
-	MountPath   string    `json:"mount_path"`
-	Strategy    Strategy  `json:"strategy"`
-	PayloadTmpl string    `json:"payload_tmpl"`
-	Description string    `json:"description"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Category       string    `json:"category"`
+	ScopeTag       string    `json:"scope_tag"`
+	SingBoxVersion string    `json:"sing_box_version"` // 新增：母版适用的 Sing-box 版本
+	MountPath      string    `json:"mount_path"`
+	Strategy       Strategy  `json:"strategy"`
+	PayloadTmpl    string    `json:"payload_tmpl"`
+	Description    string    `json:"description"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Module struct {
@@ -27,7 +28,7 @@ type Module struct {
 	TemplateID  string     `json:"template_id"`
 	Name        string     `json:"name"`
 	Category    string     `json:"category"`
-	Tags        []string   `json:"tags"` // 补齐积木标签
+	Tags        []string   `json:"tags"`
 	ParamsJSON  string     `json:"params_json"`
 	Description string     `json:"description"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -51,7 +52,7 @@ type Profile struct {
 	ID             string                 `json:"id"`
 	Name           string                 `json:"name"`
 	Token          string                 `json:"token"`
-	Tags           []string               `json:"tags"` // 补齐方案标签
+	Tags           []string               `json:"tags"`
 	Description    string                 `json:"description"`
 	SingBoxVersion string                 `json:"sing_box_version"`
 	Capabilities   ProfileCapabilities    `json:"capabilities"`
@@ -78,6 +79,8 @@ type Device struct {
 	SSHUser         string       `json:"ssh_user"`
 	SSHPort         int          `json:"ssh_port"`
 	RemotePath      string       `json:"remote_path"`
+	DeployStrategy  string       `json:"deploy_strategy"` // "systemd" | "podman" | "docker" | "standalone"
+	ServiceName     string       `json:"service_name"`
 	Tags            []string     `json:"tags"`
 	EnablePing      bool         `json:"enable_ping"`
 	EnablePush      bool         `json:"enable_push"`

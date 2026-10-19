@@ -237,13 +237,23 @@ export class WorkspaceState {
     if (!this.activeProfileId) return;
     this.isCompiling = true;
     this.compileError = '';
+    this.validationReport = null; // 每次编译前清空旧报告
     try {
+      // 删除了 res: any，享受 TS 自动类型推断的保护
       const res = await api.compileProfile(this.activeProfileId);
-      this.compiledJSON = res.json;
-      this.activeCommitHash = res.commitHash;
-      this.validationReport = res.validation || null;
+      
+      if (res.json) {
+        this.compiledJSON = res.json;
+      }
+      
+      if (res.error) {
+        this.compileError = res.error;
+      } else {
+        this.activeCommitHash = res.commitHash;
+        this.validationReport = res.validation || null;
+      }
     } catch (e: unknown) {
-      this.compileError = e instanceof Error ? e.message : '编译异常';
+      this.compileError = e instanceof Error ? e.message : '内部装配异常';
     } finally {
       this.isCompiling = false;
     }
@@ -252,7 +262,9 @@ export class WorkspaceState {
   async fetchUpdaterStatus() {
     try {
       this.updaterStatus = await api.getUpdaterStatus();
-    } catch {}
+    } catch (e) {
+      console.debug('fetchUpdaterStatus skip:', e); // 添加内容，解除 no-empty 警告
+    }
   }
 
   

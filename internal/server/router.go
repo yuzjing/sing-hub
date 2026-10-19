@@ -354,13 +354,12 @@ func (s *Server) handleDeployDevice(w http.ResponseWriter, r *http.Request) {
 		timeoutSec = t
 	}
 
-	verifiedHash, err := remote.DeployConfig(*dev, configBytes, time.Duration(timeoutSec)*time.Second)
+	result, err := remote.DeployConfig(*dev, configBytes, time.Duration(timeoutSec)*time.Second)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "logs": result.Logs})
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"verified_hash": verifiedHash})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleGetUpdaterStatus(w http.ResponseWriter, r *http.Request) {

@@ -8,6 +8,7 @@ import type {
   NodePingReport,
   UpdaterStatus,
   ValidationReport,
+  DeployResult
 } from './types';
 
 class ApiClient {
@@ -27,13 +28,12 @@ class ApiClient {
         if (errObj && errObj.error) {
           errMsg = errObj.error;
         }
-      } catch {
-        // 无法解析 JSON 则采用默认错误提示
+      } catch (e) {
+        console.debug('Failed to parse error response', e);
       }
       throw new Error(errMsg);
     }
 
-    // 处理 204 No Content
     if (res.status === 204) {
       return {} as T;
     }
@@ -41,7 +41,7 @@ class ApiClient {
     return res.json();
   }
 
-  // ==================== 1. Components (第 1 层：工坊语法母版) ====================
+  // ==================== Components ====================
 
   async getComponents(): Promise<Component[]> {
     return this.request<Component[]>('/api/components');
@@ -71,15 +71,15 @@ class ApiClient {
     const data = await this.request<{ json: string }>('/api/components/preview', {
       method: 'POST',
       body: JSON.stringify({
-        template: tmpl,
-        params: paramsJson,
+        payload_tmpl: tmpl,
+        params_json: paramsJson,
         node_id: nodeId,
       }),
     });
     return data.json;
   }
 
-  // ==================== 2. Modules (第 2 层：成品积木库) ====================
+  // ==================== Modules ====================
 
   async getModules(): Promise<Module[]> {
     return this.request<Module[]>('/api/modules');
@@ -105,7 +105,7 @@ class ApiClient {
     });
   }
 
-  // ==================== 3. Profiles (第 3 层：大盘方案配方) ====================
+  // ==================== Profiles ====================
 
   async getProfiles(): Promise<Profile[]> {
     return this.request<Profile[]>('/api/profiles');
@@ -135,32 +135,53 @@ class ApiClient {
     });
   }
 
-  async compileProfile(id: string): Promise<{ json: string; commitHash: string; validation?: ValidationReport }> {
+  // 签名中加入 error?: string，拥抱严格类型
+  async compileProfile(id: string): Promise<{ json: string; commitHash: string; validation?: ValidationReport; error?: string }> {
     const res = await fetch(`/api/profiles/${id}/compile`, {
       method: 'POST',
     });
+
+    const rawText = await res.text();
+
     if (!res.ok) {
-      let errMsg = `编译失败: HTTP ${res.status}`;
+      let errMsg = `编译未通过: HTTP ${res.status}`;
+      let invalidJson = '';
       try {
-        const errObj = await res.json();
-        if (errObj && errObj.error) errMsg = errObj.error;
-      } catch {}
-      throw new Error(errMsg);
+        const errObj = JSON.parse(rawText);
+        if (errObj.error) errMsg = errObj.error;
+        if (errObj.json) invalidJson = errObj.json;
+      } catch (e) {
+        console.debug('Failed to parse compile error', e);
+      }
+
+      // 彻底去除 as any，由于签名允许了 error 字段，这里完美匹配！
+      return {
+        json: invalidJson,
+        commitHash: '',
+        error: errMsg
+      };
     }
-    const data = await res.json();
-    return {
-      json: data.json,
-      commitHash: data.commit_hash || '',
-      validation: data.validation,
-    };
-  }
 
-  async getUpdaterStatus(): Promise<UpdaterStatus> {
-    return this.request<UpdaterStatus>('/api/system/updater');
-  }
-
-  async triggerUpdate(): Promise<void> {
-    return this.request<void>('/api/system/updater/trigger', { method: 'POST' });
+    const commitHash = res.headers.get('X-Commit-Hash') || '';
+    try {
+      const parsed = JSON.parse(rawText);
+      if (typeof parsed.json === 'string') {
+        return {
+          json: parsed.json,
+          commitHash: parsed.commit_hash || commitHash,
+          validation: parsed.validation,
+        };
+      }
+      return {
+        json: JSON.stringify(parsed, null, 2),
+        commitHash,
+      };
+    } catch {
+      return {
+        json: rawText,
+        commitHash,
+      };
+    }
   }
 
   async getHistory(profileId: string): Promise<CommitRecord[]> {
@@ -168,17 +189,18 @@ class ApiClient {
   }
 
   async getDiff(profileId: string, commit: string): Promise<{ diff: string }> {
-    return this.request<{ diff: string }>(`/api/profiles/${profileId}/diff/${commit}`);
+    return this.request<{ diff: string }>(`/api/profiles/${profileId}/diff?commit=${commit}`);
   }
 
   async rollback(profileId: string, commit: string): Promise<string> {
-    const res = await this.request<{ json: string }>(`/api/profiles/${profileId}/rollback/${commit}`, {
+    const res = await this.request<{ json: string }>(`/api/profiles/${profileId}/rollback`, {
       method: 'POST',
+      body: JSON.stringify({ commit }),
     });
     return res.json;
   }
 
-  // ==================== 4. Devices (基础设施节点运维) ====================
+  // ==================== Devices ====================
 
   async getDevices(): Promise<Device[]> {
     return this.request<Device[]>('/api/devices');
@@ -216,56 +238,63 @@ class ApiClient {
     });
   }
 
-  async deployDevice(deviceId: string): Promise<{ verified_hash: string }> {
-    return this.request<{ verified_hash: string }>(`/api/devices/${deviceId}/deploy`, {
-      method: 'POST',
-    });
+  async deployDevice(deviceId: string): Promise<DeployResult> {
+    const res = await fetch(`/api/devices/${deviceId}/deploy`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      throw { message: data.error || '部署失败', logs: data.logs || '' };
+    }
+    return data as DeployResult;
   }
 
-  // ==================== 5. Settings & Backups (系统设置与快照热恢复) ====================
+  // ==================== System ====================
 
   async getSettings(): Promise<Record<string, string>> {
-    return this.request<Record<string, string>>('/api/settings');
+    return this.request<Record<string, string>>('/api/system/settings');
   }
 
   async saveSettings(settings: Record<string, string>): Promise<void> {
-    return this.request<void>('/api/settings', {
+    return this.request<void>('/api/system/settings', {
       method: 'POST',
       body: JSON.stringify(settings),
     });
   }
 
-  
-
   async getLogLevel(): Promise<{ level: string }> {
-    return this.request<{ level: string }>('/api/settings/loglevel');
+    return this.request<{ level: string }>('/api/system/log-level');
   }
 
   async setLogLevel(level: 'INFO' | 'DEBUG'): Promise<void> {
-    return this.request<void>('/api/settings/loglevel', {
+    return this.request<void>('/api/system/log-level', {
       method: 'POST',
       body: JSON.stringify({ level }),
     });
   }
 
   async listServerBackups(): Promise<{ file_name: string; path: string; size_bytes: number; created_at: string }[]> {
-    return this.request<{ file_name: string; path: string; size_bytes: number; created_at: string }[]>('/api/settings/backups');
+    return this.request<{ file_name: string; path: string; size_bytes: number; created_at: string }[]>('/api/system/backups');
   }
 
-  async createServerBackup(): Promise<{ file_name: string }> {
-    return this.request<{ file_name: string }>('/api/settings/backups', {
+  async createServerBackup(): Promise<{ file_name: string; path: string }> {
+    return this.request<{ file_name: string; path: string }>('/api/system/backup/create', {
       method: 'POST',
     });
   }
 
   async restoreFromServerPath(path: string): Promise<void> {
-    return this.request<void>('/api/settings/backups/restore', {
+    return this.request<void>('/api/system/restore/path', {
       method: 'POST',
       body: JSON.stringify({ path }),
     });
   }
 
-  
+  async getUpdaterStatus(): Promise<UpdaterStatus> {
+    return this.request<UpdaterStatus>('/api/system/updater');
+  }
+
+  async triggerUpdate(): Promise<void> {
+    return this.request<void>('/api/system/updater/trigger', { method: 'POST' });
+  }
 }
 
 export const api = new ApiClient();

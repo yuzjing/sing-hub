@@ -1,4 +1,5 @@
 // frontend/src/lib/types.ts
+
 export type Strategy = 'append' | 'merge';
 
 export interface Component {
@@ -6,6 +7,7 @@ export interface Component {
   name: string;
   category: string;
   scope_tag: string;
+  sing_box_version: string;
   mount_path: string;
   strategy: Strategy;
   payload_tmpl: string;
@@ -18,7 +20,7 @@ export interface Module {
   template_id: string;
   name: string;
   category: string;
-  tags?: string[]; // 补齐积木标签
+  tags?: string[];
   params_json: string;
   description: string;
   updated_at?: string;
@@ -42,7 +44,7 @@ export interface Profile {
   id: string;
   name: string;
   token: string;
-  tags?: string[]; // 补齐方案标签
+  tags?: string[];
   description: string;
   sing_box_version: string;
   capabilities: ProfileCapabilities;
@@ -69,6 +71,8 @@ export interface Device {
   ssh_user: string;
   ssh_port: number;
   remote_path: string;
+  deploy_strategy: string; // 新增：部署策略
+  service_name: string;    // 新增：服务名称
   tags: string[];
   enable_ping: boolean;
   enable_push: boolean;
@@ -109,4 +113,11 @@ export interface ValidationReport {
   enabled: boolean;
   stable?: ValidationResult;
   alpha?: ValidationResult;
+}
+
+export interface DeployResult {
+  success: boolean;
+  verified_hash: string;
+  remote_version: string;
+  logs: string;
 }

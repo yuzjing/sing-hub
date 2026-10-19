@@ -78,7 +78,7 @@
   {#if filteredVars.length === 0}
     <div class="text-sm text-zinc-500 italic py-6 text-center">无匹配的参数插孔。</div>
   {:else}
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 max-h-[26rem] overflow-y-auto pr-2">
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 max-h-104 overflow-y-auto pr-2">
       {#each filteredVars as v (v)}
         {@const curVal = String(params[v] ?? '')}
         {@const isRef = curVal.startsWith('@node:')}
@@ -124,9 +124,9 @@
   {@const targetVar = activeMenuVar}
   <button type="button" tabindex="-1" aria-label="关闭引用菜单" class="fixed inset-0 z-50 bg-transparent cursor-default border-none p-0 w-full h-full" onclick={() => activeMenuVar = null}></button>
 
-  <div style="top: {menuPos.top}px; right: {menuPos.right}px;" class="fixed z-50 w-80 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-zinc-700 dark:bg-zinc-900/95 text-sm space-y-3 animate-in fade-in zoom-in-95 duration-100 max-h-[26rem] overflow-y-auto">
+  <div style="top: {menuPos.top}px; right: {menuPos.right}px;" class="fixed z-50 w-80 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-zinc-700 dark:bg-zinc-900/95 text-sm space-y-3 animate-in fade-in zoom-in-95 duration-100 max-h-104 overflow-y-auto">
     <div>
-      <span class="text-xs font-bold text-zinc-500 uppercase tracking-wider block px-1.5 mb-2 flex items-center gap-1.5">
+      <span class="text-xs font-bold text-zinc-500 uppercase tracking-wider block px-1.5 mb-2 items-center gap-1.5">
         <Icon name="server" size={14} color="blue" />
         <span>选择网络节点的端点或属性</span>
       </span>

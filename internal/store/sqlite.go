@@ -49,6 +49,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		name TEXT NOT NULL,
 		category TEXT NOT NULL DEFAULT 'routing',
 		scope_tag TEXT NOT NULL DEFAULT 'universal',
+		sing_box_version TEXT NOT NULL DEFAULT 'universal',
 		mount_path TEXT NOT NULL,
 		strategy TEXT NOT NULL,
 		payload_tmpl TEXT NOT NULL,
@@ -62,6 +63,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		name TEXT NOT NULL,
 		category TEXT NOT NULL DEFAULT 'io',
 		params_json TEXT NOT NULL DEFAULT '{}',
+		tags_json TEXT NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL DEFAULT '',
 		updated_at DATETIME NOT NULL,
 		FOREIGN KEY (template_id) REFERENCES components(id) ON DELETE CASCADE
@@ -71,6 +73,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		token TEXT NOT NULL UNIQUE,
+		tags_json TEXT NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL DEFAULT '',
 		sing_box_version TEXT NOT NULL DEFAULT '',
 		enable_subscribe INTEGER NOT NULL DEFAULT 1,
@@ -102,6 +105,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		ssh_user TEXT NOT NULL DEFAULT 'root',
 		ssh_port INTEGER NOT NULL DEFAULT 22,
 		remote_path TEXT NOT NULL DEFAULT '~/.config/sing-box/config.json',
+		deploy_strategy TEXT NOT NULL DEFAULT 'systemd',
+		service_name TEXT NOT NULL DEFAULT 'sing-box',
 		tags_json TEXT NOT NULL DEFAULT '[]',
 		enable_ping INTEGER NOT NULL DEFAULT 1,
 		enable_push INTEGER NOT NULL DEFAULT 1,
@@ -119,10 +124,12 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 
-	// 自动安全扩容旧表 props_json 字段
-	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN props_json TEXT NOT NULL DEFAULT '[]'")
+	_, _ = s.db.ExecContext(ctx, "ALTER TABLE components ADD COLUMN sing_box_version TEXT NOT NULL DEFAULT 'universal'")
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE modules ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'")
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE profiles ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'")
+	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN props_json TEXT NOT NULL DEFAULT '[]'")
+	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN deploy_strategy TEXT NOT NULL DEFAULT 'systemd'")
+	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN service_name TEXT NOT NULL DEFAULT 'sing-box'")
 
 	_ = s.migrateOldComponentsToModules(ctx)
 
@@ -181,7 +188,7 @@ func (s *Store) ListModules(ctx context.Context) ([]model.Module, error) {
 	list := make([]model.Module, 0)
 	query := `
 	SELECT m.id, m.template_id, m.name, m.category, m.params_json, m.tags_json, m.description, m.updated_at,
-	       c.name, c.mount_path, c.strategy, c.scope_tag
+	       c.name, c.mount_path, c.strategy, c.scope_tag, c.sing_box_version
 	FROM modules m
 	LEFT JOIN components c ON m.template_id = c.id
 	ORDER BY m.category ASC, m.name ASC
@@ -195,19 +202,20 @@ func (s *Store) ListModules(ctx context.Context) ([]model.Module, error) {
 	for rows.Next() {
 		var m model.Module
 		var tagsJSON string
-		var cName, mountPath, strategy, scopeTag sql.NullString
+		var cName, mountPath, strategy, scopeTag, sbVer sql.NullString
 		if err := rows.Scan(&m.ID, &m.TemplateID, &m.Name, &m.Category, &m.ParamsJSON, &tagsJSON, &m.Description, &m.UpdatedAt,
-			&cName, &mountPath, &strategy, &scopeTag); err != nil {
+			&cName, &mountPath, &strategy, &scopeTag, &sbVer); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(tagsJSON), &m.Tags)
 		if cName.Valid {
 			m.Template = &model.Component{
-				ID:        m.TemplateID,
-				Name:      cName.String,
-				MountPath: mountPath.String,
-				Strategy:  model.Strategy(strategy.String),
-				ScopeTag:  scopeTag.String,
+				ID:             m.TemplateID,
+				Name:           cName.String,
+				MountPath:      mountPath.String,
+				Strategy:       model.Strategy(strategy.String),
+				ScopeTag:       scopeTag.String,
+				SingBoxVersion: sbVer.String,
 			}
 		}
 		list = append(list, m)
@@ -267,7 +275,7 @@ func (s *Store) BatchDeleteModules(ctx context.Context, ids []string) error {
 
 func (s *Store) ListComponents(ctx context.Context) ([]model.Component, error) {
 	list := make([]model.Component, 0)
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, category, scope_tag, mount_path, strategy, payload_tmpl, description, updated_at FROM components ORDER BY category ASC, name ASC")
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name, category, scope_tag, sing_box_version, mount_path, strategy, payload_tmpl, description, updated_at FROM components ORDER BY category ASC, name ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +283,7 @@ func (s *Store) ListComponents(ctx context.Context) ([]model.Component, error) {
 
 	for rows.Next() {
 		var c model.Component
-		if err := rows.Scan(&c.ID, &c.Name, &c.Category, &c.ScopeTag, &c.MountPath, &c.Strategy, &c.PayloadTmpl, &c.Description, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Category, &c.ScopeTag, &c.SingBoxVersion, &c.MountPath, &c.Strategy, &c.PayloadTmpl, &c.Description, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, c)
@@ -285,8 +293,8 @@ func (s *Store) ListComponents(ctx context.Context) ([]model.Component, error) {
 
 func (s *Store) GetComponent(ctx context.Context, id string) (*model.Component, error) {
 	var c model.Component
-	row := s.db.QueryRowContext(ctx, "SELECT id, name, category, scope_tag, mount_path, strategy, payload_tmpl, description, updated_at FROM components WHERE id = ?", id)
-	if err := row.Scan(&c.ID, &c.Name, &c.Category, &c.ScopeTag, &c.MountPath, &c.Strategy, &c.PayloadTmpl, &c.Description, &c.UpdatedAt); err != nil {
+	row := s.db.QueryRowContext(ctx, "SELECT id, name, category, scope_tag, sing_box_version, mount_path, strategy, payload_tmpl, description, updated_at FROM components WHERE id = ?", id)
+	if err := row.Scan(&c.ID, &c.Name, &c.Category, &c.ScopeTag, &c.SingBoxVersion, &c.MountPath, &c.Strategy, &c.PayloadTmpl, &c.Description, &c.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -297,19 +305,20 @@ func (s *Store) SaveComponent(ctx context.Context, c model.Component) error {
 	defer s.mu.Unlock()
 
 	query := `
-	INSERT INTO components (id, name, category, scope_tag, mount_path, strategy, payload_tmpl, description, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO components (id, name, category, scope_tag, sing_box_version, mount_path, strategy, payload_tmpl, description, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		category = excluded.category,
 		scope_tag = excluded.scope_tag,
+		sing_box_version = excluded.sing_box_version,
 		mount_path = excluded.mount_path,
 		strategy = excluded.strategy,
 		payload_tmpl = excluded.payload_tmpl,
 		description = excluded.description,
 		updated_at = excluded.updated_at;
 	`
-	_, err := s.db.ExecContext(ctx, query, c.ID, c.Name, c.Category, c.ScopeTag, c.MountPath, c.Strategy, c.PayloadTmpl, c.Description, time.Now())
+	_, err := s.db.ExecContext(ctx, query, c.ID, c.Name, c.Category, c.ScopeTag, c.SingBoxVersion, c.MountPath, c.Strategy, c.PayloadTmpl, c.Description, time.Now())
 	return err
 }
 
@@ -514,7 +523,7 @@ func (s *Store) GetResolvedProfileModules(ctx context.Context, profileID string)
 	query := `
 	SELECT pm.id, pm.profile_id, pm.module_id, pm.order_index,
 	       COALESCE(m.id, ''), COALESCE(m.template_id, ''), COALESCE(m.name, '未命名积木'), COALESCE(m.category, 'io'), COALESCE(m.params_json, '{}'), COALESCE(m.description, ''), m.updated_at,
-	       COALESCE(c.id, ''), COALESCE(c.name, '未命名母版'), COALESCE(c.category, 'io'), COALESCE(c.scope_tag, 'universal'), COALESCE(c.mount_path, 'inbounds'), COALESCE(c.strategy, 'append'), COALESCE(c.payload_tmpl, '{}'), COALESCE(c.description, ''), c.updated_at
+	       COALESCE(c.id, ''), COALESCE(c.name, '未命名母版'), COALESCE(c.category, 'io'), COALESCE(c.scope_tag, 'universal'), COALESCE(c.sing_box_version, 'universal'), COALESCE(c.mount_path, 'inbounds'), COALESCE(c.strategy, 'append'), COALESCE(c.payload_tmpl, '{}'), COALESCE(c.description, ''), c.updated_at
 	FROM profile_modules pm
 	LEFT JOIN modules m ON pm.module_id = m.id
 	LEFT JOIN components c ON m.template_id = c.id
@@ -535,7 +544,7 @@ func (s *Store) GetResolvedProfileModules(ctx context.Context, profileID string)
 		if err := rows.Scan(
 			&item.Binding.ID, &item.Binding.ProfileID, &item.Binding.ModuleID, &item.Binding.OrderIndex,
 			&item.Module.ID, &item.Module.TemplateID, &item.Module.Name, &item.Module.Category, &item.Module.ParamsJSON, &item.Module.Description, &mUpdatedAt,
-			&item.Template.ID, &item.Template.Name, &item.Template.Category, &item.Template.ScopeTag, &item.Template.MountPath, &item.Template.Strategy, &item.Template.PayloadTmpl, &item.Template.Description, &cUpdatedAt,
+			&item.Template.ID, &item.Template.Name, &item.Template.Category, &item.Template.ScopeTag, &item.Template.SingBoxVersion, &item.Template.MountPath, &item.Template.Strategy, &item.Template.PayloadTmpl, &item.Template.Description, &cUpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -574,7 +583,7 @@ func (s *Store) GetResolvedProfileModules(ctx context.Context, profileID string)
 
 func (s *Store) ListDevices(ctx context.Context) ([]model.Device, error) {
 	list := make([]model.Device, 0)
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, tags_json, enable_ping, enable_push, description, updated_at FROM devices ORDER BY name ASC")
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, tags_json, enable_ping, enable_push, description, updated_at FROM devices ORDER BY name ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -584,7 +593,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]model.Device, error) {
 		var d model.Device
 		var epsJSON, propsJSON, tagsJSON string
 		var ping, push int
-		if err := rows.Scan(&d.ID, &d.Name, &epsJSON, &propsJSON, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &tagsJSON, &ping, &push, &d.Description, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &epsJSON, &propsJSON, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &tagsJSON, &ping, &push, &d.Description, &d.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(epsJSON), &d.Endpoints)
@@ -601,8 +610,8 @@ func (s *Store) GetDevice(ctx context.Context, id string) (*model.Device, error)
 	var d model.Device
 	var epsJSON, propsJSON, tagsJSON string
 	var ping, push int
-	row := s.db.QueryRowContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, tags_json, enable_ping, enable_push, description, updated_at FROM devices WHERE id = ?", id)
-	if err := row.Scan(&d.ID, &d.Name, &epsJSON, &propsJSON, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &tagsJSON, &ping, &push, &d.Description, &d.UpdatedAt); err != nil {
+	row := s.db.QueryRowContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, tags_json, enable_ping, enable_push, description, updated_at FROM devices WHERE id = ?", id)
+	if err := row.Scan(&d.ID, &d.Name, &epsJSON, &propsJSON, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &tagsJSON, &ping, &push, &d.Description, &d.UpdatedAt); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(epsJSON), &d.Endpoints)
@@ -629,9 +638,16 @@ func (s *Store) SaveDevice(ctx context.Context, d model.Device) error {
 		push = 1
 	}
 
+	if d.DeployStrategy == "" {
+		d.DeployStrategy = "systemd"
+	}
+	if d.ServiceName == "" {
+		d.ServiceName = "sing-box"
+	}
+
 	query := `
-	INSERT INTO devices (id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, tags_json, enable_ping, enable_push, description, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO devices (id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, tags_json, enable_ping, enable_push, description, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		endpoints_json = excluded.endpoints_json,
@@ -644,13 +660,15 @@ func (s *Store) SaveDevice(ctx context.Context, d model.Device) error {
 		ssh_user = excluded.ssh_user,
 		ssh_port = excluded.ssh_port,
 		remote_path = excluded.remote_path,
+		deploy_strategy = excluded.deploy_strategy,
+		service_name = excluded.service_name,
 		tags_json = excluded.tags_json,
 		enable_ping = excluded.enable_ping,
 		enable_push = excluded.enable_push,
 		description = excluded.description,
 		updated_at = excluded.updated_at;
 	`
-	_, err := s.db.ExecContext(ctx, query, d.ID, d.Name, string(epsB), string(propsB), d.SSHHost, d.TargetProfileID, d.AuthType, d.AuthSecret, d.KeyPath, d.SSHUser, d.SSHPort, d.RemotePath, string(tagsB), ping, push, d.Description, time.Now())
+	_, err := s.db.ExecContext(ctx, query, d.ID, d.Name, string(epsB), string(propsB), d.SSHHost, d.TargetProfileID, d.AuthType, d.AuthSecret, d.KeyPath, d.SSHUser, d.SSHPort, d.RemotePath, d.DeployStrategy, d.ServiceName, string(tagsB), ping, push, d.Description, time.Now())
 	return err
 }
 
@@ -686,51 +704,53 @@ func (s *Store) SetSetting(ctx context.Context, key string, value string) error 
 	return err
 }
 
+// 关键修复：加入 devices 和 settings 的导出！
 func (s *Store) DumpSQL(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var sb strings.Builder
-	sb.WriteString("-- Sing-Hub Database Dump\n\n")
+	sb.WriteString("-- Sing-Hub Database Dump (Complete State)\n\n")
 
-	cRows, err := s.db.QueryContext(ctx, "SELECT id, name, category, scope_tag, mount_path, strategy, payload_tmpl, description, updated_at FROM components")
+	cRows, err := s.db.QueryContext(ctx, "SELECT id, name, category, scope_tag, sing_box_version, mount_path, strategy, payload_tmpl, description, updated_at FROM components")
 	if err == nil {
 		defer cRows.Close()
 		for cRows.Next() {
 			var c model.Component
-			_ = cRows.Scan(&c.ID, &c.Name, &c.Category, &c.ScopeTag, &c.MountPath, &c.Strategy, &c.PayloadTmpl, &c.Description, &c.UpdatedAt)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO components VALUES (%q, %q, %q, %q, %q, %q, %q, %q, %q);\n",
-				c.ID, c.Name, c.Category, c.ScopeTag, c.MountPath, c.Strategy, c.PayloadTmpl, c.Description, c.UpdatedAt.Format(time.RFC3339)))
+			_ = cRows.Scan(&c.ID, &c.Name, &c.Category, &c.ScopeTag, &c.SingBoxVersion, &c.MountPath, &c.Strategy, &c.PayloadTmpl, &c.Description, &c.UpdatedAt)
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO components VALUES (%q, %q, %q, %q, %q, %q, %q, %q, %q, %q);\n",
+				c.ID, c.Name, c.Category, c.ScopeTag, c.SingBoxVersion, c.MountPath, c.Strategy, c.PayloadTmpl, c.Description, c.UpdatedAt.Format(time.RFC3339)))
 		}
 		if err := cRows.Err(); err != nil {
 			return "", err
 		}
 	}
 
-	mRows, err := s.db.QueryContext(ctx, "SELECT id, template_id, name, category, params_json, description, updated_at FROM modules")
+	mRows, err := s.db.QueryContext(ctx, "SELECT id, template_id, name, category, params_json, tags_json, description, updated_at FROM modules")
 	if err == nil {
 		defer mRows.Close()
 		for mRows.Next() {
 			var m model.Module
-			_ = mRows.Scan(&m.ID, &m.TemplateID, &m.Name, &m.Category, &m.ParamsJSON, &m.Description, &m.UpdatedAt)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO modules VALUES (%q, %q, %q, %q, %q, %q, %q);\n",
-				m.ID, m.TemplateID, m.Name, m.Category, m.ParamsJSON, m.Description, m.UpdatedAt.Format(time.RFC3339)))
+			var tagsJSON string
+			_ = mRows.Scan(&m.ID, &m.TemplateID, &m.Name, &m.Category, &m.ParamsJSON, &tagsJSON, &m.Description, &m.UpdatedAt)
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO modules VALUES (%q, %q, %q, %q, %q, %q, %q, %q);\n",
+				m.ID, m.TemplateID, m.Name, m.Category, m.ParamsJSON, tagsJSON, m.Description, m.UpdatedAt.Format(time.RFC3339)))
 		}
 		if err := mRows.Err(); err != nil {
 			return "", err
 		}
 	}
 
-	pRows, err := s.db.QueryContext(ctx, "SELECT id, name, token, description, sing_box_version, enable_subscribe, enable_ping, enable_push, updated_at FROM profiles")
+	pRows, err := s.db.QueryContext(ctx, "SELECT id, name, token, tags_json, description, sing_box_version, enable_subscribe, enable_ping, enable_push, updated_at FROM profiles")
 	if err == nil {
 		defer pRows.Close()
 		for pRows.Next() {
-			var id, name, token, desc, sbv string
+			var id, name, token, tagsJSON, desc, sbv string
 			var sub, ping, push int
 			var u time.Time
-			_ = pRows.Scan(&id, &name, &token, &desc, &sbv, &sub, &ping, &push, &u)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO profiles VALUES (%q, %q, %q, %q, %q, %d, %d, %d, %q);\n",
-				id, name, token, desc, sbv, sub, ping, push, u.Format(time.RFC3339)))
+			_ = pRows.Scan(&id, &name, &token, &tagsJSON, &desc, &sbv, &sub, &ping, &push, &u)
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO profiles VALUES (%q, %q, %q, %q, %q, %q, %d, %d, %d, %q);\n",
+				id, name, token, tagsJSON, desc, sbv, sub, ping, push, u.Format(time.RFC3339)))
 		}
 		if err := pRows.Err(); err != nil {
 			return "", err
@@ -747,6 +767,38 @@ func (s *Store) DumpSQL(ctx context.Context) (string, error) {
 			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO profile_modules VALUES (%q, %q, %q, %d);\n", id, pid, mid, order))
 		}
 		if err := pmRows.Err(); err != nil {
+			return "", err
+		}
+	}
+
+	// 导出 devices
+	dRows, err := s.db.QueryContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, tags_json, enable_ping, enable_push, description, updated_at FROM devices")
+	if err == nil {
+		defer dRows.Close()
+		for dRows.Next() {
+			var d model.Device
+			var eps, props, tags string
+			var ping, push int
+			var u time.Time
+			_ = dRows.Scan(&d.ID, &d.Name, &eps, &props, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &tags, &ping, &push, &u)
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO devices VALUES (%q, %q, %q, %q, %q, %q, %q, %q, %q, %q, %d, %q, %q, %q, %q, %d, %d, %q, %q);\n",
+				d.ID, d.Name, eps, props, d.SSHHost, d.TargetProfileID, d.AuthType, d.AuthSecret, d.KeyPath, d.SSHUser, d.SSHPort, d.RemotePath, d.DeployStrategy, d.ServiceName, tags, ping, push, d.Description, u.Format(time.RFC3339)))
+		}
+		if err := dRows.Err(); err != nil {
+			return "", err
+		}
+	}
+
+	// 导出 settings
+	setRows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings")
+	if err == nil {
+		defer setRows.Close()
+		for setRows.Next() {
+			var k, v string
+			_ = setRows.Scan(&k, &v)
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO settings VALUES (%q, %q);\n", k, v))
+		}
+		if err := setRows.Err(); err != nil {
 			return "", err
 		}
 	}
