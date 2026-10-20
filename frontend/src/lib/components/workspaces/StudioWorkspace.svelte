@@ -7,6 +7,7 @@
   import Icon from '$lib/components/Icon.svelte';
   import ParamBinder from '$lib/components/ParamBinder.svelte';
   import TagFilter from '$lib/components/TagFilter.svelte';
+   import { SvelteSet } from 'svelte/reactivity';
 
   interface Props {
     isProfileManageMode?: boolean;
@@ -109,7 +110,7 @@
 
   let referencedNodes = $derived.by(() => {
     if (!ws.activeProfile) return [];
-    const nodeIds = new Set<string>();
+    const nodeIds = new SvelteSet<string>();
     for (const item of ws.resolvedModuleBindings) {
       const p = safeParse(item.module.params_json);
       for (const val of Object.values(p)) {
@@ -217,6 +218,9 @@
             <button onclick={() => ws.selectProfile(p.id)} type="button" class="truncate text-left flex-1 cursor-pointer">
               {p.name}
             </button>
+            {#if p.sing_box_version && p.sing_box_version !== 'universal'}
+              <span class="ml-1.5 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/50 text-[9px] font-mono font-bold shrink-0">v{p.sing_box_version}</span>
+            {/if}
           </div>
 
           <div class="flex items-center gap-1.5 shrink-0">

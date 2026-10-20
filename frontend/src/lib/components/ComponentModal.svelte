@@ -22,6 +22,7 @@
   let name = $state('');
   let category = $state('routing');
   let scopeTag = $state('universal');
+  let singBoxVersion = $state('universal');
   let mountPath = $state('route.rules');
   let strategy = $state<Strategy>('append');
   let payloadTmpl = $state('{\n  \n}');
@@ -34,6 +35,7 @@
         name = editComponent.name;
         category = editComponent.category;
         scopeTag = editComponent.scope_tag;
+        singBoxVersion = editComponent.sing_box_version || 'universal';
         mountPath = editComponent.mount_path;
         strategy = editComponent.strategy;
         payloadTmpl = editComponent.payload_tmpl;
@@ -43,6 +45,7 @@
         name = '';
         category = 'routing';
         scopeTag = 'universal';
+        singBoxVersion = 'universal';
         mountPath = 'route.rules';
         strategy = 'append';
         payloadTmpl = '{\n  \n}';
@@ -75,6 +78,7 @@
       name: name.trim(),
       category,
       scope_tag: scopeTag.trim(),
+      sing_box_version: singBoxVersion.trim() || 'universal',
       mount_path: mountPath.trim(),
       strategy,
       payload_tmpl: payloadTmpl.trim(),
@@ -114,6 +118,26 @@
               bind:value={name}
               placeholder="如: VLESS 出站通用模板"
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">最低兼容内核版本</span>
+            <input
+              bind:value={singBoxVersion}
+              placeholder="如 1.14.0 或 universal"
+              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+
+          <label class="block">
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">作用范围标签 (Scope)</span>
+            <input
+              bind:value={scopeTag}
+              placeholder="如 universal 或 routing"
+              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
         </div>

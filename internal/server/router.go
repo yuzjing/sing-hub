@@ -359,6 +359,13 @@ func (s *Server) handleDeployDevice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "logs": result.Logs})
 		return
 	}
+
+	// 更新数据库中该节点的最新远端版本记录
+	if result.RemoteVersion != "Unknown" && result.RemoteVersion != dev.LastRemoteVer {
+		dev.LastRemoteVer = result.RemoteVersion
+		_ = s.store.SaveDevice(r.Context(), *dev)
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -499,6 +506,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings := map[string]string{
 		"git_remote_url":          s.store.GetSetting(r.Context(), "git_remote_url", ""),
 		"git_branch":              s.store.GetSetting(r.Context(), "git_branch", "main"),
+		"github_proxy":            s.store.GetSetting(r.Context(), "github_proxy", ""),
 		"git_token":               s.store.GetSetting(r.Context(), "git_token", ""),
 		"ssh_timeout":             s.store.GetSetting(r.Context(), "ssh_timeout", "10"),
 		"singbox_update_channel":  s.store.GetSetting(r.Context(), "singbox_update_channel", "all"),

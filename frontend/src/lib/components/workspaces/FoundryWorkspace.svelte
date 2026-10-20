@@ -59,7 +59,6 @@
   let studioPreviewError = $state('');
   let editorRef = $state<{ insertAtCursor: (snippet: string) => void } | null>(null);
 
-  // 母版标签统计与多选
   let selectedFilterTags = $state<string[]>([]);
   let tagCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
@@ -223,11 +222,19 @@
                     </button>
                   </div>
 
+                  <!-- 胶囊优化：一体化微拟态组合徽章 -->
                   <div class="flex items-center gap-1.5 shrink-0">
                     {#if !isCompManageMode}
-                      <span class="font-mono text-[9px] text-zinc-500 dark:text-zinc-400 font-bold px-1.5 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
-                        {comp.scope_tag}
-                      </span>
+                      <div class="inline-flex items-center rounded-lg border border-zinc-200/80 bg-zinc-100/70 p-0.5 dark:border-zinc-700/80 dark:bg-zinc-800/60 shadow-2xs">
+                        {#if comp.sing_box_version && comp.sing_box_version !== 'universal'}
+                          <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[10px] font-bold">
+                            v{comp.sing_box_version}
+                          </span>
+                        {/if}
+                        <span class="px-1.5 py-0.5 font-mono text-[10px] font-semibold text-zinc-600 dark:text-zinc-400">
+                          {comp.scope_tag}
+                        </span>
+                      </div>
                     {:else}
                       <button title="克隆母版" onclick={() => onCloneComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
                         <Icon name="copy" size={14} />
@@ -261,6 +268,11 @@
             <span class="rounded-md border border-zinc-200 bg-zinc-100 px-2 py-0.5 font-mono text-xs font-bold text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 shadow-2xs">
               [{selectedComp.mount_path}]
             </span>
+            {#if selectedComp.sing_box_version && selectedComp.sing_box_version !== 'universal'}
+              <span class="rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/40 px-2 py-0.5 font-mono text-xs font-bold">
+                内核: v{selectedComp.sing_box_version}
+              </span>
+            {/if}
           </div>
 
           <div class="flex items-center gap-2">

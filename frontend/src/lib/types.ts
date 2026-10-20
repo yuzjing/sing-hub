@@ -73,6 +73,7 @@ export interface Device {
   remote_path: string;
   deploy_strategy: string; // 新增：部署策略
   service_name: string;    // 新增：服务名称
+  last_remote_ver?: string;
   tags: string[];
   enable_ping: boolean;
   enable_push: boolean;
@@ -97,8 +98,11 @@ export interface NodePingReport {
 
 export interface UpdaterStatus {
   is_running: boolean;
-  stable_version: string;
-  alpha_version: string;
+  bin_dir?: string;
+  local_stable_version: string;
+  local_alpha_version: string;
+  remote_stable_version: string;
+  remote_alpha_version: string;
   last_check: string;
   last_error: string;
 }

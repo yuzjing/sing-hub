@@ -5,6 +5,7 @@ go 1.27.2
 require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	golang.org/x/crypto v0.58.0
+	golang.org/x/net v0.60.0
 	modernc.org/sqlite v1.60.1
 )
 

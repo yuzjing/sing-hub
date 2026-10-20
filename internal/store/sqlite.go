@@ -107,6 +107,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		remote_path TEXT NOT NULL DEFAULT '~/.config/sing-box/config.json',
 		deploy_strategy TEXT NOT NULL DEFAULT 'systemd',
 		service_name TEXT NOT NULL DEFAULT 'sing-box',
+		last_remote_ver TEXT NOT NULL DEFAULT '',
 		tags_json TEXT NOT NULL DEFAULT '[]',
 		enable_ping INTEGER NOT NULL DEFAULT 1,
 		enable_push INTEGER NOT NULL DEFAULT 1,
@@ -130,6 +131,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN props_json TEXT NOT NULL DEFAULT '[]'")
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN deploy_strategy TEXT NOT NULL DEFAULT 'systemd'")
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN service_name TEXT NOT NULL DEFAULT 'sing-box'")
+	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN last_remote_ver TEXT NOT NULL DEFAULT ''")
 
 	_ = s.migrateOldComponentsToModules(ctx)
 
@@ -418,10 +420,7 @@ func (s *Store) GetProfile(ctx context.Context, id string) (*model.Profile, erro
 		}
 		p.Modules = append(p.Modules, b)
 	}
-	if err := bRows.Err(); err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return &p, bRows.Err()
 }
 
 func (s *Store) GetProfileByToken(ctx context.Context, token string) (*model.Profile, error) {
@@ -444,16 +443,13 @@ func (s *Store) SaveProfile(ctx context.Context, p model.Profile) error {
 	defer tx.Rollback()
 
 	tagsB, _ := json.Marshal(p.Tags)
-
-	sub := 0
+	sub, ping, push := 0, 0, 0
 	if p.Capabilities.EnableSubscribe {
 		sub = 1
 	}
-	ping := 0
 	if p.Capabilities.EnablePing {
 		ping = 1
 	}
-	push := 0
 	if p.Capabilities.EnablePush {
 		push = 1
 	}
@@ -583,7 +579,12 @@ func (s *Store) GetResolvedProfileModules(ctx context.Context, profileID string)
 
 func (s *Store) ListDevices(ctx context.Context) ([]model.Device, error) {
 	list := make([]model.Device, 0)
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, tags_json, enable_ping, enable_push, description, updated_at FROM devices ORDER BY name ASC")
+	query := `SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id,
+	                 auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path,
+	                 deploy_strategy, service_name, last_remote_ver, tags_json,
+	                 enable_ping, enable_push, description, updated_at
+	          FROM devices ORDER BY name ASC`
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -593,7 +594,12 @@ func (s *Store) ListDevices(ctx context.Context) ([]model.Device, error) {
 		var d model.Device
 		var epsJSON, propsJSON, tagsJSON string
 		var ping, push int
-		if err := rows.Scan(&d.ID, &d.Name, &epsJSON, &propsJSON, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &tagsJSON, &ping, &push, &d.Description, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&d.ID, &d.Name, &epsJSON, &propsJSON, &d.SSHHost, &d.TargetProfileID,
+			&d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath,
+			&d.DeployStrategy, &d.ServiceName, &d.LastRemoteVer, &tagsJSON,
+			&ping, &push, &d.Description, &d.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(epsJSON), &d.Endpoints)
@@ -610,8 +616,18 @@ func (s *Store) GetDevice(ctx context.Context, id string) (*model.Device, error)
 	var d model.Device
 	var epsJSON, propsJSON, tagsJSON string
 	var ping, push int
-	row := s.db.QueryRowContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, tags_json, enable_ping, enable_push, description, updated_at FROM devices WHERE id = ?", id)
-	if err := row.Scan(&d.ID, &d.Name, &epsJSON, &propsJSON, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &tagsJSON, &ping, &push, &d.Description, &d.UpdatedAt); err != nil {
+	query := `SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id,
+	                 auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path,
+	                 deploy_strategy, service_name, last_remote_ver, tags_json,
+	                 enable_ping, enable_push, description, updated_at
+	          FROM devices WHERE id = ?`
+	row := s.db.QueryRowContext(ctx, query, id)
+	if err := row.Scan(
+		&d.ID, &d.Name, &epsJSON, &propsJSON, &d.SSHHost, &d.TargetProfileID,
+		&d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath,
+		&d.DeployStrategy, &d.ServiceName, &d.LastRemoteVer, &tagsJSON,
+		&ping, &push, &d.Description, &d.UpdatedAt,
+	); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(epsJSON), &d.Endpoints)
@@ -646,8 +662,12 @@ func (s *Store) SaveDevice(ctx context.Context, d model.Device) error {
 	}
 
 	query := `
-	INSERT INTO devices (id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, tags_json, enable_ping, enable_push, description, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO devices (
+		id, name, endpoints_json, props_json, ssh_host, target_profile_id,
+		auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path,
+		deploy_strategy, service_name, last_remote_ver, tags_json,
+		enable_ping, enable_push, description, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		endpoints_json = excluded.endpoints_json,
@@ -662,13 +682,19 @@ func (s *Store) SaveDevice(ctx context.Context, d model.Device) error {
 		remote_path = excluded.remote_path,
 		deploy_strategy = excluded.deploy_strategy,
 		service_name = excluded.service_name,
+		last_remote_ver = excluded.last_remote_ver,
 		tags_json = excluded.tags_json,
 		enable_ping = excluded.enable_ping,
 		enable_push = excluded.enable_push,
 		description = excluded.description,
 		updated_at = excluded.updated_at;
 	`
-	_, err := s.db.ExecContext(ctx, query, d.ID, d.Name, string(epsB), string(propsB), d.SSHHost, d.TargetProfileID, d.AuthType, d.AuthSecret, d.KeyPath, d.SSHUser, d.SSHPort, d.RemotePath, d.DeployStrategy, d.ServiceName, string(tagsB), ping, push, d.Description, time.Now())
+	_, err := s.db.ExecContext(ctx, query,
+		d.ID, d.Name, string(epsB), string(propsB), d.SSHHost, d.TargetProfileID,
+		d.AuthType, d.AuthSecret, d.KeyPath, d.SSHUser, d.SSHPort, d.RemotePath,
+		d.DeployStrategy, d.ServiceName, d.LastRemoteVer, string(tagsB),
+		ping, push, d.Description, time.Now(),
+	)
 	return err
 }
 
@@ -704,7 +730,8 @@ func (s *Store) SetSetting(ctx context.Context, key string, value string) error 
 	return err
 }
 
-// 关键修复：加入 devices 和 settings 的导出！
+// ==================== SQL Backup & Restore ====================
+
 func (s *Store) DumpSQL(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -771,8 +798,7 @@ func (s *Store) DumpSQL(ctx context.Context) (string, error) {
 		}
 	}
 
-	// 导出 devices
-	dRows, err := s.db.QueryContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, tags_json, enable_ping, enable_push, description, updated_at FROM devices")
+	dRows, err := s.db.QueryContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, last_remote_ver, tags_json, enable_ping, enable_push, description, updated_at FROM devices")
 	if err == nil {
 		defer dRows.Close()
 		for dRows.Next() {
@@ -780,16 +806,15 @@ func (s *Store) DumpSQL(ctx context.Context) (string, error) {
 			var eps, props, tags string
 			var ping, push int
 			var u time.Time
-			_ = dRows.Scan(&d.ID, &d.Name, &eps, &props, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &tags, &ping, &push, &u)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO devices VALUES (%q, %q, %q, %q, %q, %q, %q, %q, %q, %q, %d, %q, %q, %q, %q, %d, %d, %q, %q);\n",
-				d.ID, d.Name, eps, props, d.SSHHost, d.TargetProfileID, d.AuthType, d.AuthSecret, d.KeyPath, d.SSHUser, d.SSHPort, d.RemotePath, d.DeployStrategy, d.ServiceName, tags, ping, push, d.Description, u.Format(time.RFC3339)))
+			_ = dRows.Scan(&d.ID, &d.Name, &eps, &props, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &d.LastRemoteVer, &tags, &ping, &push, &d.Description, &u)
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO devices VALUES (%q, %q, %q, %q, %q, %q, %q, %q, %q, %q, %d, %q, %q, %q, %q, %q, %d, %d, %q, %q);\n",
+				d.ID, d.Name, eps, props, d.SSHHost, d.TargetProfileID, d.AuthType, d.AuthSecret, d.KeyPath, d.SSHUser, d.SSHPort, d.RemotePath, d.DeployStrategy, d.ServiceName, d.LastRemoteVer, tags, ping, push, d.Description, u.Format(time.RFC3339)))
 		}
 		if err := dRows.Err(); err != nil {
 			return "", err
 		}
 	}
 
-	// 导出 settings
 	setRows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings")
 	if err == nil {
 		defer setRows.Close()

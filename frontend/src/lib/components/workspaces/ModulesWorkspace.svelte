@@ -7,6 +7,7 @@
   import Icon from '$lib/components/Icon.svelte';
   import ParamBinder from '$lib/components/ParamBinder.svelte';
   import TagFilter from '$lib/components/TagFilter.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   interface Props {
     activeModuleId?: string;
@@ -49,7 +50,6 @@
     collapsedCategories[catKey] = !collapsedCategories[catKey];
   }
 
-  // 补齐积木标签数量统计
   let tagCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
     ws.modules.forEach((m: Module) => {
@@ -89,7 +89,7 @@
 
   let usedNodes = $derived.by(() => {
     if (!draftParams) return [];
-    const nodeIds = new Set<string>();
+    const nodeIds = new SvelteSet<string>();
     for (const val of Object.values(draftParams)) {
       const s = String(val);
       if (s.startsWith('@node:')) {
@@ -247,13 +247,21 @@
                     <button onclick={() => { activeModuleId = mod.id; }} type="button" class="truncate text-left flex-1 cursor-pointer font-medium">
                       {mod.name}
                     </button>
+                    
                   </div>
 
                   <div class="flex items-center gap-1.5 shrink-0">
                     {#if !isModuleManageMode}
-                      <span class="font-mono text-[10px] text-zinc-400 font-bold px-1.5 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
-                        {mod.template?.mount_path || 'path'}
-                      </span>
+                      <div class="inline-flex items-center rounded-lg border border-zinc-200/80 bg-zinc-100/70 p-0.5 dark:border-zinc-700/80 dark:bg-zinc-800/60 shadow-2xs">
+                        {#if mod.template?.sing_box_version && mod.template.sing_box_version !== 'universal'}
+                          <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[10px] font-bold">
+                            v{mod.template.sing_box_version}
+                          </span>
+                        {/if}
+                        <span class="px-1.5 py-0.5 font-mono text-[10px] font-semibold text-zinc-600 dark:text-zinc-400">
+                          {mod.template?.mount_path || 'path'}
+                        </span>
+                      </div>
                     {:else}
                       <button title="克隆积木" onclick={() => onCloneModule(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
                         <Icon name="copy" size={14} />
@@ -295,9 +303,15 @@
                 ws.switchWorkspace('foundry');
               }}
               type="button"
-              class="text-xs text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer transition"
+              class="text-xs text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer transition flex items-center gap-1.5"
             >
-              {targetTmpl?.name || selectedModule.template_id} ↗
+              <span>{targetTmpl?.name || selectedModule.template_id} ↗</span>
+              <!-- 修复点：安全使用 targetTmpl 的版本，不使用 mod 变量 -->
+              {#if targetTmpl?.sing_box_version && targetTmpl.sing_box_version !== 'universal'}
+                <span class="px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/50 text-[9px] font-mono font-bold">
+                  v{targetTmpl.sing_box_version}
+                </span>
+              {/if}
             </button>
           </div>
 
@@ -426,7 +440,6 @@
           {/if}
         </div>
         
-        <!-- 错误面板呈现 -->
         {#if previewError}
           <div class="m-4 p-4 rounded-xl bg-rose-50/80 text-rose-800 border border-rose-200/80 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/60 text-xs font-mono whitespace-pre-wrap overflow-y-auto max-h-48 shadow-inner transition-all">
             <div class="flex items-center gap-1.5 mb-2 font-bold text-rose-700 dark:text-rose-400">

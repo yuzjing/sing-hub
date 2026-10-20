@@ -13,6 +13,14 @@
 
   let isSavingSettings = $state(false);
   let linterEnabled = $state(true);
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
 
   $effect(() => {
     if (open) {
@@ -20,6 +28,8 @@
       if (!ws.systemSettings.singbox_update_channel) ws.systemSettings.singbox_update_channel = 'all';
       if (!ws.systemSettings.singbox_update_interval) ws.systemSettings.singbox_update_interval = '24';
       ws.fetchUpdaterStatus();
+    } else {
+      stopPolling();
     }
   });
 
@@ -31,8 +41,19 @@
 
   async function handleTriggerUpdate() {
     await api.triggerUpdate();
-    ws.showToast('已下发后台更新任务，请稍候...', 'info');
-    ws.fetchUpdaterStatus();
+    ws.showToast('已下发后台更新任务，正在检测拉取...', 'info');
+    await ws.fetchUpdaterStatus();
+
+    stopPolling();
+    pollTimer = setInterval(async () => {
+      await ws.fetchUpdaterStatus();
+      if (!ws.updaterStatus?.is_running) {
+        stopPolling();
+        if (!ws.updaterStatus?.last_error) {
+          ws.showToast('内核库拉取与校验完成 ✓', 'success');
+        }
+      }
+    }, 1200);
   }
 
   async function handleSaveSettings() {
@@ -42,7 +63,6 @@
       await ws.saveSettings(ws.systemSettings);
       ws.showToast('系统设置已持久化保存 ✓', 'success');
 
-      // 关键：若修改了语法开关，立即静默重新编译当前方案，让大盘警告框立刻消失/显现！
       if (ws.activeProfileId) {
         ws.triggerCompile();
       }
@@ -56,6 +76,17 @@
       isSavingSettings = false;
     }
   }
+
+  // 状态判定派生
+  let isStableSynced = $derived.by(() => {
+    const s = ws.updaterStatus;
+    return s && s.local_stable_version !== '未安装' && s.remote_stable_version !== '-' && s.local_stable_version === s.remote_stable_version;
+  });
+
+  let isAlphaSynced = $derived.by(() => {
+    const s = ws.updaterStatus;
+    return s && s.local_alpha_version !== '未安装' && s.remote_alpha_version !== '-' && s.local_alpha_version === s.remote_alpha_version;
+  });
 </script>
 
 {#if open}
@@ -108,24 +139,96 @@
                 </label>
               </div>
 
-              <div class="rounded-xl border border-blue-200/60 bg-blue-50/40 p-3.5 dark:border-blue-900/40 dark:bg-blue-950/20 space-y-2">
+              <!-- 代理与下载加速源 -->
+              <div class="space-y-2">
+                <label class="block">
+                  <span class="block text-[11px] font-medium text-zinc-600 dark:text-zinc-300 mb-1">GitHub API 下载加速代理 (HTTP / SOCKS5)</span>
+                  <input
+                    bind:value={ws.systemSettings.github_proxy}
+                    placeholder="如 socks5h://127.0.0.1:20122 留空直连"
+                    class="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </label>
+
+                <label class="block">
+                  <span class="block text-[11px] font-medium text-zinc-600 dark:text-zinc-300 mb-1">
+                    GitHub Release 下载加速镜像前缀 (可选)
+                  </span>
+                  <input
+                    bind:value={ws.systemSettings.github_mirror}
+                    placeholder="如 https://gh-proxy.net 自动拼接在链接前"
+                    class="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </label>
+              </div>
+
+              <!-- 内核运行与版本矩阵卡片 -->
+              <div class="rounded-xl border border-blue-200/60 bg-blue-50/40 p-3.5 dark:border-blue-900/40 dark:bg-blue-950/20 space-y-3">
                 <div class="flex items-center justify-between border-b border-blue-100 pb-2 dark:border-blue-900/50">
-                  <span class="font-semibold text-blue-800 dark:text-blue-300 text-xs">本地内核库运行状态</span>
+                  <span class="font-semibold text-blue-800 dark:text-blue-300 text-xs">Sing-box 内核版本对照</span>
                   <button
                     disabled={ws.updaterStatus?.is_running}
                     onclick={handleTriggerUpdate}
                     type="button"
-                    class="rounded bg-blue-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-blue-500 cursor-pointer disabled:opacity-50 transition"
+                    class="rounded-lg bg-blue-600 px-3 py-1 text-xs font-bold text-white hover:bg-blue-500 cursor-pointer disabled:opacity-50 transition flex items-center gap-1.5 shadow-2xs"
                   >
-                    {ws.updaterStatus?.is_running ? '拉取中...' : '检查并下载'}
+                    {#if ws.updaterStatus?.is_running}
+                      <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+                      <span>拉取同步中...</span>
+                    {:else}
+                      <span>检查并拉取</span>
+                    {/if}
                   </button>
                 </div>
-                <div class="grid grid-cols-2 gap-2 text-xs font-mono text-blue-700/90 dark:text-blue-400">
-                  <div>Stable: <strong class="text-blue-950 dark:text-blue-200">{ws.updaterStatus?.stable_version || '-'}</strong></div>
-                  <div>Alpha: <strong class="text-blue-950 dark:text-blue-200">{ws.updaterStatus?.alpha_version || '-'}</strong></div>
-                  <div class="col-span-2 text-zinc-500 text-[11px]">上次检查: {ws.updaterStatus?.last_check || '-'}</div>
+
+                <div class="grid grid-cols-2 gap-3 text-xs font-mono">
+                  <!-- 本地物理版本（带对齐打勾与可更新小胶囊） -->
+                  <div class="bg-white/60 dark:bg-zinc-900/60 p-2.5 rounded-lg border border-blue-100 dark:border-blue-900/30 space-y-1.5">
+                    <span class="text-[10px] uppercase font-bold text-zinc-400 block">本地物理版本</span>
+                    <div class="flex items-center justify-between">
+                      <span class="text-zinc-600 dark:text-zinc-300">Stable: <strong class="{ws.updaterStatus?.local_stable_version === '未安装' ? 'text-zinc-400' : 'text-zinc-900 dark:text-zinc-100'}">{ws.updaterStatus?.local_stable_version || '未安装'}</strong></span>
+                      {#if isStableSynced}
+                        <span class="px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 text-[9px] font-bold">✓</span>
+                      {/if}
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-zinc-600 dark:text-zinc-300">Alpha: <strong class="{ws.updaterStatus?.local_alpha_version === '未安装' ? 'text-zinc-400' : 'text-zinc-900 dark:text-zinc-100'}">{ws.updaterStatus?.local_alpha_version || '未安装'}</strong></span>
+                      {#if isAlphaSynced}
+                        <span class="px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 text-[9px] font-bold">✓</span>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <!-- 远程最新版本 -->
+                  <div class="bg-white/60 dark:bg-zinc-900/60 p-2.5 rounded-lg border border-blue-100 dark:border-blue-900/30 space-y-1.5">
+                    <span class="text-[10px] uppercase font-bold text-blue-500 block">GitHub 远端版本</span>
+                    <div>Stable: <strong class="text-blue-900 dark:text-blue-200">{ws.updaterStatus?.remote_stable_version || '-'}</strong></div>
+                    <div>Alpha: <strong class="text-blue-900 dark:text-blue-200">{ws.updaterStatus?.remote_alpha_version || '-'}</strong></div>
+                  </div>
+                </div>
+
+                <!-- 优化沙箱显示 -->
+                <div class="flex items-center justify-between text-[10px] font-mono text-zinc-400 pt-0.5">
+                  <span class="truncate" title={ws.updaterStatus?.bin_dir}>
+                    沙箱目录: <span class="text-zinc-600 dark:text-zinc-300 font-semibold">./data/bin</span>
+                  </span>
+                </div>
+
+                <!-- 底部状态与红框结果指示徽章 -->
+                <div class="flex items-center justify-between text-[11px] font-mono text-zinc-500 pt-2 border-t border-blue-100/60 dark:border-blue-900/30">
+                  <span>上次检查: {ws.updaterStatus?.last_check || '-'}</span>
+
+                  <!-- 优雅的结果呈现徽章 -->
                   {#if ws.updaterStatus?.last_error}
-                    <div class="col-span-2 text-rose-500 wrap-break-word mt-1">{ws.updaterStatus.last_error}</div>
+                    <span class="px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950/60 dark:text-rose-400 dark:border-rose-900/50 font-bold text-[10px] truncate max-w-50" title={ws.updaterStatus.last_error}>
+                      ⚠️ 更新存在异常
+                    </span>
+                  {:else if isStableSynced && isAlphaSynced}
+                    <span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-900/50 font-bold text-[10px] flex items-center gap-1 shadow-2xs">
+                      <span>✓ 双轨同步就绪</span>
+                    </span>
+                  {:else}
+                    <span class="text-zinc-400 text-[10px]">待检查或已更新</span>
                   {/if}
                 </div>
               </div>
@@ -196,8 +299,8 @@
           </div>
 
           <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-            {#each ws.serverBackups as b}
-              <div class="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 text-xs font-mono">
+            {#each ws.serverBackups as b (b.file_name)}
+              <div class="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 text-[11px] font-mono">
                 <div class="truncate mr-2">
                   <span class="text-zinc-700 dark:text-zinc-300 block truncate">{b.file_name}</span>
                   <span class="text-[10px] text-zinc-400">{(b.size_bytes / 1024).toFixed(1)} KB</span>

@@ -35,7 +35,6 @@
   let showDeployModal = $state(false);
 
   let availableTags = $derived.by(() => {
-    // 修复：Svelte 5 推荐使用 SvelteSet 追踪状态
     const tags = new SvelteSet<string>();
     ws.devices.forEach((d: Device) => {
       (d.tags || []).forEach((t: string) => tags.add(t));
@@ -73,7 +72,6 @@
       deployStatus = 'success';
       ws.showToast('推送部署成功 ✓', 'success');
     } catch (e: unknown) {
-      // 修复：严谨捕捉抛出的包含 logs 的抛出对象，不再使用 any
       const err = e as { message?: string; logs?: string };
       deployLogs = (err.logs || '') + `\n\n[✖] 部署过程中断: ${err.message || '未知错误'}`;
       deployStatus = 'error';
@@ -137,6 +135,8 @@
     {:else}
       <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
         {#each filteredDevices as dev (dev.id)}
+          <!-- Svelte 5 合规：@const 必须是 #each 的直接子节点 -->
+          {@const targetProfile = ws.profiles.find(p => p.id === dev.target_profile_id)}
           {@const allProps = dev.props && dev.props.length > 0 ? dev.props : dev.endpoints.map((ep: string, i: number) => ({ key: 'ep_' + i, label: '端点' + (i+1), value: ep }))}
           {@const isExpanded = expandedPropDevIds.includes(dev.id)}
           {@const visibleProps = isExpanded ? allProps : allProps.slice(0, 3)}
@@ -157,9 +157,22 @@
                     />
                   {/if}
                   <div>
-                    <div class="flex items-center gap-2.5">
+                    <!-- 节点版本展示点 1：标题栏双版本对比 -->
+                    <div class="flex items-center gap-2.5 flex-wrap">
                       <h3 class="text-base font-extrabold text-zinc-900 dark:text-zinc-100">{dev.name}</h3>
                       <span class="rounded-md bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 font-mono text-xs font-semibold text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">{dev.id}</span>
+                      
+                      {#if dev.last_remote_ver}
+                        <span class="rounded-md bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/50 px-2 py-0.5 font-mono text-[10px] font-bold" title="远程实体物理内核">
+                          内核: {dev.last_remote_ver}
+                        </span>
+                      {/if}
+
+                      {#if targetProfile?.sing_box_version && targetProfile.sing_box_version !== 'universal'}
+                        <span class="rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/50 px-2 py-0.5 font-mono text-[10px] font-bold" title="指派方案要求内核">
+                          目标: v{targetProfile.sing_box_version}
+                        </span>
+                      {/if}
                     </div>
 
                     {#if dev.tags && dev.tags.length > 0}
@@ -248,7 +261,6 @@
                   </div>
 
                   <div class="space-y-1.5">
-                    <!-- 修复：补齐 key -->
                     {#each visibleProps as p (p.key)}
                       <div class="flex items-center justify-between font-mono text-xs bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-2xs hover:border-blue-300 transition">
                         <span class="text-zinc-500 font-medium truncate max-w-[40%]">{p.label || p.key}:</span>
@@ -261,6 +273,7 @@
                 </div>
 
                 <div class="grid grid-cols-2 gap-4 border-t border-zinc-200/60 pt-4 dark:border-zinc-800/80">
+                  <!-- 节点版本展示点 2：生效方案插槽内带版本 Badge -->
                   <div class="space-y-1.5">
                     <span class="text-zinc-500 font-bold text-xs uppercase tracking-wider block">生效方案绑定</span>
                     {#if dev.target_profile_id}
@@ -272,8 +285,15 @@
                         type="button"
                         class="w-full text-left rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-400 hover:border-amber-400 transition flex items-center justify-between shadow-2xs cursor-pointer"
                       >
-                        <span class="truncate">{ws.profiles.find(p => p.id === dev.target_profile_id)?.name || dev.target_profile_id}</span>
-                        <Icon name="layers" size={13} class="shrink-0" />
+                        <span class="truncate">{targetProfile?.name || dev.target_profile_id}</span>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                          {#if targetProfile?.sing_box_version && targetProfile.sing_box_version !== 'universal'}
+                            <span class="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 text-[9px] font-mono">
+                              v{targetProfile.sing_box_version}
+                            </span>
+                          {/if}
+                          <Icon name="layers" size={13} />
+                        </div>
                       </button>
                     {:else}
                       <span class="text-zinc-400 text-xs font-medium bg-zinc-100 dark:bg-zinc-900 px-3 py-1.5 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 block">未指派方案</span>
@@ -295,6 +315,7 @@
             </div>
 
             <!-- 卡片底部极客运维栏 -->
+            <!-- 找到卡片底部极客运维栏：将原本只有终端路径的区域，更新为在红框位置插入内核状态胶囊 -->
             <div class="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800/80 shrink-0">
               <div class="flex items-center gap-2 flex-1 min-w-0 mr-4">
                 <Icon name="terminal" size={14} class="text-zinc-400 shrink-0" />
@@ -319,21 +340,41 @@
                 {/if}
               </div>
 
-              {#if dev.enable_push && dev.target_profile_id}
-                <button
-                  disabled={isDeployingId === dev.id}
-                  onclick={() => handleDeploy(dev)}
-                  type="button"
-                  class="rounded-xl bg-blue-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-blue-500 cursor-pointer shadow-md shadow-blue-600/20 transition flex items-center gap-2 shrink-0 disabled:opacity-60"
-                >
-                  <Icon name="terminal" size={14} class={isDeployingId === dev.id ? 'animate-spin' : ''} />
-                  <span>{isDeployingId === dev.id ? '部署预检中...' : '安全部署配置'}</span>
-                </button>
-              {:else}
-                <span class="text-xs font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-2xs">
-                  {!dev.target_profile_id ? '需先指派方案' : '推送已禁用'}
-                </span>
-              {/if}
+              <div class="flex items-center gap-3">
+                <!-- 核心新增：红框位置节点内核版本胶囊 -->
+                {#if dev.last_remote_ver}
+                  <div class="inline-flex items-center rounded-lg border border-zinc-200/80 bg-zinc-100/70 p-0.5 dark:border-zinc-700/80 dark:bg-zinc-800/60 shadow-2xs font-mono text-xs">
+                    <span class="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold text-[11px]" title="节点实际内核版本">
+                      {dev.last_remote_ver}
+                    </span>
+                    {#if targetProfile?.sing_box_version && targetProfile.sing_box_version !== 'universal'}
+                      {@const isMatch = dev.last_remote_ver.includes(targetProfile.sing_box_version)}
+                      <span class="px-1.5 py-0.5 font-bold text-[10px] {isMatch ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}" title={isMatch ? '内核版本与生效方案高度契合' : '内核版本与方案版本存在差异'}>
+                        {isMatch ? '✓ 匹配' : '⚠️ 差异'}
+                      </span>
+                    {/if}
+                  </div>
+                {:else}
+                  <span class="text-xs font-mono text-zinc-400 italic">待部署探测版本</span>
+                {/if}
+
+                <!-- 部署按钮 -->
+                {#if dev.enable_push && dev.target_profile_id}
+                  <button
+                    disabled={isDeployingId === dev.id}
+                    onclick={() => handleDeploy(dev)}
+                    type="button"
+                    class="rounded-xl bg-blue-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-blue-500 cursor-pointer shadow-md shadow-blue-600/20 transition flex items-center gap-2 shrink-0 disabled:opacity-60"
+                  >
+                    <Icon name="terminal" size={14} class={isDeployingId === dev.id ? 'animate-spin' : ''} />
+                    <span>{isDeployingId === dev.id ? '部署预检中...' : '安全部署配置'}</span>
+                  </button>
+                {:else}
+                  <span class="text-xs font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-2xs">
+                    {!dev.target_profile_id ? '需先指派方案' : '推送已禁用'}
+                  </span>
+                {/if}
+              </div>
             </div>
           </div>
         {/each}

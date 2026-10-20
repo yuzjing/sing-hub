@@ -15,7 +15,7 @@ type Component struct {
 	Name           string    `json:"name"`
 	Category       string    `json:"category"`
 	ScopeTag       string    `json:"scope_tag"`
-	SingBoxVersion string    `json:"sing_box_version"` // 新增：母版适用的 Sing-box 版本
+	SingBoxVersion string    `json:"sing_box_version"`
 	MountPath      string    `json:"mount_path"`
 	Strategy       Strategy  `json:"strategy"`
 	PayloadTmpl    string    `json:"payload_tmpl"`
@@ -79,11 +79,12 @@ type Device struct {
 	SSHUser         string       `json:"ssh_user"`
 	SSHPort         int          `json:"ssh_port"`
 	RemotePath      string       `json:"remote_path"`
-	DeployStrategy  string       `json:"deploy_strategy"` // "systemd" | "podman" | "docker" | "standalone"
+	DeployStrategy  string       `json:"deploy_strategy"`
 	ServiceName     string       `json:"service_name"`
 	Tags            []string     `json:"tags"`
 	EnablePing      bool         `json:"enable_ping"`
 	EnablePush      bool         `json:"enable_push"`
+	LastRemoteVer   string       `json:"last_remote_ver"` // 新增：最后一次成功探测到的节点远端版本
 	Description     string       `json:"description"`
 	UpdatedAt       time.Time    `json:"updated_at"`
 }
@@ -105,4 +106,14 @@ type NodePingReport struct {
 
 type BatchDeleteReq struct {
 	IDs []string `json:"ids"`
+}
+
+type UpdaterStatus struct {
+	IsRunning           bool   `json:"is_running"`
+	LocalStableVersion  string `json:"local_stable_version"`  // 本地物理存在的稳定版
+	LocalAlphaVersion   string `json:"local_alpha_version"`   // 本地物理存在的尝鲜版
+	RemoteStableVersion string `json:"remote_stable_version"` // GitHub 最新稳定版
+	RemoteAlphaVersion  string `json:"remote_alpha_version"`  // GitHub 最新尝鲜版
+	LastCheck           string `json:"last_check"`
+	LastError           string `json:"last_error"`
 }
