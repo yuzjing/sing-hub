@@ -208,11 +208,17 @@
                 </div>
 
                 <!-- 优化沙箱显示 -->
-                <div class="flex items-center justify-between text-[10px] font-mono text-zinc-400 pt-0.5">
-                  <span class="truncate" title={ws.updaterStatus?.bin_dir}>
-                    沙箱目录: <span class="text-zinc-600 dark:text-zinc-300 font-semibold">./data/bin</span>
-                  </span>
-                </div>
+                {#if ws.updaterStatus?.bin_dir}
+                  {@const fullPath = ws.updaterStatus.bin_dir}
+                  <!-- 智能截取路径最后两级（例如展示 .../data/bin 或 .../.per/bin） -->
+                  {@const displayRel = fullPath.split('/').slice(-2).join('/')}
+                  <div class="flex items-center justify-between text-[10px] font-mono text-zinc-400 pt-0.5">
+                    <span class="truncate" title={fullPath}>
+                      沙箱目录: <span class="text-zinc-600 dark:text-zinc-300 font-semibold font-mono">{displayRel}</span>
+                    </span>
+                    <span class="text-[9px] text-zinc-400 shrink-0">（来自 config.toml）</span>
+                  </div>
+                {/if}
 
                 <!-- 底部状态与红框结果指示徽章 -->
                 <div class="flex items-center justify-between text-[11px] font-mono text-zinc-500 pt-2 border-t border-blue-100/60 dark:border-blue-900/30">

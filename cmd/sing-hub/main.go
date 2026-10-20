@@ -15,7 +15,7 @@ import (
 	"sing-hub/internal/config"
 	"sing-hub/internal/server"
 	"sing-hub/internal/store"
-	"sing-hub/internal/updater" // 必须引入 updater 模块
+	"sing-hub/internal/updater"
 	"sing-hub/internal/versioning"
 )
 
@@ -62,8 +62,9 @@ func main() {
 
 	eng := assembler.New(s, gitRepo)
 
-	// 关键修复：实例化 Updater 引擎，并启动后台热更定时任务
-	upd := updater.New(s)
+	// 核心改造：将 config.toml 中的 DataDir/bin 权威注入给 updater，杜绝任何硬编码
+	binDir := filepath.Join(cfg.Server.DataDir, "bin")
+	upd := updater.New(s, binDir)
 	upd.StartPeriodicTask()
 
 	// 将 updater 作为第 4 个参数传入 Server

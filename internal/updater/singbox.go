@@ -28,6 +28,7 @@ import (
 
 type Updater struct {
 	store     *store.Store
+	binDir    string
 	mu        sync.Mutex
 	isRunning bool
 	lastError string
@@ -45,24 +46,19 @@ type UpdaterStatus struct {
 	LastError           string `json:"last_error"`
 }
 
-func New(s *store.Store) *Updater {
-	return &Updater{store: s}
+func New(s *store.Store, binDir string) *Updater {
+	abs, err := filepath.Abs(binDir)
+	if err != nil {
+		abs = binDir
+	}
+	return &Updater{
+		store:  s,
+		binDir: abs,
+	}
 }
 
-func getBinDir() string {
-	binDir := os.Getenv("SINGBOX_BIN_DIR")
-	if binDir == "" {
-		dataDir := os.Getenv("DATA_DIR")
-		if dataDir == "" {
-			dataDir = "./data"
-		}
-		binDir = filepath.Join(dataDir, "bin")
-	}
-	abs, err := filepath.Abs(binDir)
-	if err == nil {
-		return abs
-	}
-	return binDir
+func (u *Updater) GetBinDir() string {
+	return u.binDir
 }
 
 func detectLocalBinVersion(binPath string) string {
@@ -91,13 +87,12 @@ func (u *Updater) GetStatus(ctx context.Context) UpdaterStatus {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	binDir := getBinDir()
-	stableBin := filepath.Join(binDir, "sing-box-stable")
-	alphaBin := filepath.Join(binDir, "sing-box-alpha")
+	stableBin := filepath.Join(u.binDir, "sing-box-stable")
+	alphaBin := filepath.Join(u.binDir, "sing-box-alpha")
 
 	return UpdaterStatus{
 		IsRunning:           u.isRunning,
-		BinDir:              binDir,
+		BinDir:              u.binDir,
 		LocalStableVersion:  detectLocalBinVersion(stableBin),
 		LocalAlphaVersion:   detectLocalBinVersion(alphaBin),
 		RemoteStableVersion: u.store.GetSetting(ctx, "singbox_remote_stable_ver", "-"),
@@ -186,9 +181,8 @@ func (u *Updater) runUpdateFlow() error {
 		return nil
 	}
 
-	binDir := getBinDir()
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		return fmt.Errorf("无法创建下载目录 %s: %w", binDir, err)
+	if err := os.MkdirAll(u.binDir, 0755); err != nil {
+		return fmt.Errorf("无法创建下载目录 %s: %w", u.binDir, err)
 	}
 
 	token := u.store.GetSetting(ctx, "git_token", "")
@@ -201,12 +195,12 @@ func (u *Updater) runUpdateFlow() error {
 
 	var errs []string
 	if channel == "stable" || channel == "all" {
-		if err := u.downloadChannel(ctx, "stable", binDir, token, mirror, proxyClient); err != nil {
+		if err := u.downloadChannel(ctx, "stable", u.binDir, token, mirror, proxyClient); err != nil {
 			errs = append(errs, "Stable: "+err.Error())
 		}
 	}
 	if channel == "alpha" || channel == "all" {
-		if err := u.downloadChannel(ctx, "alpha", binDir, token, mirror, proxyClient); err != nil {
+		if err := u.downloadChannel(ctx, "alpha", u.binDir, token, mirror, proxyClient); err != nil {
 			errs = append(errs, "Alpha: "+err.Error())
 		}
 	}
