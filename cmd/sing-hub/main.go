@@ -60,10 +60,9 @@ func main() {
 		slog.Warn("gitops engine init warning (version audit disabled)", "err", err)
 	}
 
-	eng := assembler.New(s, gitRepo)
-
 	// 核心改造：将 config.toml 中的 DataDir/bin 权威注入给 updater，杜绝任何硬编码
 	binDir := filepath.Join(cfg.Server.DataDir, "bin")
+	eng := assembler.New(s, gitRepo, binDir)
 	upd := updater.New(s, binDir)
 	upd.StartPeriodicTask()
 

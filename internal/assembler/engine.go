@@ -37,10 +37,16 @@ type ValidationReport struct {
 type Engine struct {
 	store   *store.Store
 	gitRepo *versioning.GitRepo
+	binDir  string // 权威二进制路径
 }
 
-func New(s *store.Store, g *versioning.GitRepo) *Engine {
-	return &Engine{store: s, gitRepo: g}
+// New 接收权威注入的 binDir
+func New(s *store.Store, g *versioning.GitRepo, binDir string) *Engine {
+	abs, err := filepath.Abs(binDir)
+	if err != nil {
+		abs = binDir
+	}
+	return &Engine{store: s, gitRepo: g, binDir: abs}
 }
 
 func funcMap() template.FuncMap {
@@ -146,14 +152,15 @@ func ensureDefaultParams(tmplStr string, params map[string]any) {
 	}
 }
 
+// 核心修复：严谨捕获进程启动错误与输出
 func (e *Engine) runSingleBinaryCheck(ctx context.Context, binPath string, configJSON []byte) (bool, string) {
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		return false, "内核二进制未下载或路径不存在"
+		return false, fmt.Sprintf("内核未就绪: 文件不存在 (%s)", binPath)
 	}
 
 	tmpFile, err := os.CreateTemp("", "sing-box-check-*.json")
 	if err != nil {
-		return false, fmt.Sprintf("创建临时文件失败: %v", err)
+		return false, fmt.Sprintf("创建临时配置失败: %v", err)
 	}
 	defer os.Remove(tmpFile.Name())
 
@@ -166,12 +173,16 @@ func (e *Engine) runSingleBinaryCheck(ctx context.Context, binPath string, confi
 	cleanOut = strings.TrimSpace(strings.ReplaceAll(cleanOut, tmpFile.Name(), "config.json"))
 
 	if err != nil {
+		// 关键修复：若命令行输出为空，绝对不能吞掉 err！把系统级错误呈现出来
+		if cleanOut == "" {
+			cleanOut = fmt.Sprintf("内核调用异常: %v", err)
+		}
 		return false, cleanOut
 	}
 	return true, "语法校验完美通过"
 }
 
-// ValidateDualTrack 执行双轨/单轨内核语法校验
+// ValidateDualTrack 执行双轨内核语法校验
 func (e *Engine) ValidateDualTrack(ctx context.Context, configJSON []byte) ValidationReport {
 	channel := e.store.GetSetting(ctx, "singbox_update_channel", "all")
 	enabled := e.store.GetSetting(ctx, "singbox_linter_enabled", "true") == "true"
@@ -180,28 +191,19 @@ func (e *Engine) ValidateDualTrack(ctx context.Context, configJSON []byte) Valid
 		return ValidationReport{Enabled: false}
 	}
 
-	binDir := os.Getenv("SINGBOX_BIN_DIR")
-	if binDir == "" {
-		dataDir := os.Getenv("DATA_DIR")
-		if dataDir == "" {
-			dataDir = "./data"
-		}
-		binDir = filepath.Join(dataDir, "bin")
-	}
-
 	report := ValidationReport{Enabled: true}
 
 	if channel == "stable" || channel == "all" {
-		p := filepath.Join(binDir, "sing-box-stable")
+		p := filepath.Join(e.binDir, "sing-box-stable")
 		ok, msg := e.runSingleBinaryCheck(ctx, p, configJSON)
-		ver := e.store.GetSetting(ctx, "singbox_stable_ver", "Stable")
+		ver := e.store.GetSetting(ctx, "singbox_remote_stable_ver", e.store.GetSetting(ctx, "singbox_stable_ver", "Stable"))
 		report.Stable = &ValidationResult{Version: ver, Valid: ok, Output: msg}
 	}
 
 	if channel == "alpha" || channel == "all" {
-		p := filepath.Join(binDir, "sing-box-alpha")
+		p := filepath.Join(e.binDir, "sing-box-alpha")
 		ok, msg := e.runSingleBinaryCheck(ctx, p, configJSON)
-		ver := e.store.GetSetting(ctx, "singbox_alpha_ver", "Alpha")
+		ver := e.store.GetSetting(ctx, "singbox_remote_alpha_ver", e.store.GetSetting(ctx, "singbox_alpha_ver", "Alpha"))
 		report.Alpha = &ValidationResult{Version: ver, Valid: ok, Output: msg}
 	}
 

@@ -27,10 +27,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-# 核心修复 1：清理占位符
+# 清理占位符并精准覆盖真实产物
 RUN rm -rf ./internal/server/dist/*
-
-# 核心修复 2：注意末尾的 /. 代表平铺拷贝所有前端文件，精准覆盖根层级
 COPY --from=frontend-builder /app/frontend/build/. ./internal/server/dist/
 
 ARG TARGETARCH
@@ -40,12 +38,20 @@ ARG TARGETOS=linux
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-w -s" -o sing-hub ./cmd/sing-hub
 
 # ==========================================
-# 阶段 3：生产运行时镜像 (最终多架构产物)
+# 阶段 3：生产运行时镜像 (首选 Debian Slim，原生 Glibc，性能最高最稳)
 # ==========================================
-FROM alpine:latest
+FROM debian:bookworm-slim
 WORKDIR /app
 
-RUN apk add --no-cache git ca-certificates tzdata openssh-client curl jq
+# 安装必要的系统工具 (原生 Glibc 环境，与 Sing-box 官方二进制完美契合)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    openssh-client \
+    curl \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=backend-builder /app/sing-hub /usr/local/bin/sing-hub
 
 VOLUME ["/data"]
