@@ -5,10 +5,9 @@
 FROM --platform=$BUILDPLATFORM denoland/deno:latest AS frontend-builder
 WORKDIR /app/frontend
 
-# 复制前端源码
 COPY frontend/ .
 
-# 核心构建与防御性对齐：无论产物是 build、dist 还是 client 目录，统一归一化为 build/
+# 构建并标准化产物到 build/ 目录
 RUN deno install --node-modules-dir=auto && \
     deno task build && \
     if [ ! -d build ]; then \
@@ -28,8 +27,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-# 将对齐好的静态产物塞入 Go Embed 目录
-COPY --from=frontend-builder /app/frontend/build ./internal/server/dist
+# 核心修复 1：清理占位符
+RUN rm -rf ./internal/server/dist/*
+
+# 核心修复 2：注意末尾的 /. 代表平铺拷贝所有前端文件，精准覆盖根层级
+COPY --from=frontend-builder /app/frontend/build/. ./internal/server/dist/
 
 ARG TARGETARCH
 ARG TARGETOS=linux
