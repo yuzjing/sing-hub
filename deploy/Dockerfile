@@ -2,7 +2,7 @@
 # ==========================================
 # 阶段 1：前端构建 (使用纯 Deno 2，且强制在原生架构执行，秒级打出前端包)
 # ==========================================
-FROM --platform=$BUILDPLATFORM denoland/deno:2 AS frontend-builder
+FROM --platform=$BUILDPLATFORM denoland/deno:latest AS frontend-builder
 WORKDIR /app/frontend
 
 # 复制前端代码
