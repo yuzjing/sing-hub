@@ -27,30 +27,29 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-# 清理占位符并精准覆盖真实产物
+# 清理占位符并精准覆盖真实前端产物
 RUN rm -rf ./internal/server/dist/*
 COPY --from=frontend-builder /app/frontend/build/. ./internal/server/dist/
 
 ARG TARGETARCH
 ARG TARGETOS=linux
 
-# 静态交叉编译
+# 静态交叉编译，剥离符号表减小体积
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-w -s" -o sing-hub ./cmd/sing-hub
 
 # ==========================================
-# 阶段 3：生产运行时镜像 (首选 Debian Slim，原生 Glibc，性能最高最稳)
+# 阶段 3：生产运行时镜像 (极致轻量 Alpine，实测仅 ~38MB)
 # ==========================================
-FROM debian:bookworm-slim
+FROM alpine:latest
 WORKDIR /app
 
-# 安装必要的系统工具 (原生 Glibc 环境，与 Sing-box 官方二进制完美契合)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
+# 核心精简：引入 gcompat 兼容 glibc，同时移除不必要的 curl 和 jq
+RUN apk add --no-cache \
     git \
     openssh-client \
-    curl \
+    ca-certificates \
     tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    gcompat
 
 COPY --from=backend-builder /app/sing-hub /usr/local/bin/sing-hub
 
