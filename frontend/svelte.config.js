@@ -6,11 +6,12 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
   preprocess: vitePreprocess(),
   kit: {
-    // 使用静态适配器，并将 fallback 设为 index.html
+    // 关键优化：将默认的 _app 改为 app，杜绝一切静态服务器/构建工具的下划线排除问题
+    appDir: 'app',
     adapter: adapter({
       pages: 'build',
       assets: 'build',
-      fallback: 'index.html', // 关键！开启单页面应用模式，确保生成 index.html
+      fallback: 'index.html',
       precompress: false,
       strict: false
     })
