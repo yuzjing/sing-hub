@@ -1,4 +1,5 @@
-name: Build and Publish Container Image
+# .github/workflows/container.yaml
+name: Build and Publish (Image & Release)
 
 on:
   push:
@@ -7,24 +8,24 @@ on:
     tags:
       - 'v*.*.*'
 
-# 授予工作流向 GitHub Packages (ghcr.io) 推送镜像的权限
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
-  build-and-push:
+  # 任务 1：构建并发布 OCI 容器镜像到 GHCR (支持 amd64 与 arm64)
+  docker-release:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 设置 Docker Buildx（现代化多阶段构建与缓存支持）
+      - name: Set up QEMU (for multi-arch build)
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 登录 GitHub Container Registry (GHCR)
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -32,7 +33,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 提取元数据与 Tag (自动处理 latest 与 sha)
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -43,14 +43,61 @@ jobs:
             type=sha,prefix=sha-,enable=true
             type=semver,pattern={{version}}
 
-      # 构建并推送镜像
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # 任务 2：仅当打版本标签 (v*.*.*) 时，编译单二进制发布到 GitHub Releases
+  binary-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      # 构建前端静态产物并塞给 Go embed
+      - name: Build Frontend
+        run: |
+          cd frontend
+          deno install --node-modules-dir=auto
+          deno task build
+          cd ..
+          mkdir -p internal/server/dist
+          cp -r frontend/build/* internal/server/dist/
+
+      # 跨架构编译独立的单体二进制
+      - name: Build Standalone Binaries
+        run: |
+          mkdir -p dist
+          # Linux AMD64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o dist/sing-hub-linux-amd64 ./cmd/sing-hub
+          # Linux ARM64 
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o dist/sing-hub-linux-arm64 ./cmd/sing-hub
+
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/sing-hub-linux-amd64
+            dist/sing-hub-linux-arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
