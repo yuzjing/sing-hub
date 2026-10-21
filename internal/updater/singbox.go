@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 
 	"golang.org/x/net/proxy"
 )
+
+var verExtractRegex = regexp.MustCompile(`([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[a-zA-Z0-9.]+)?(?:-alpha\.[0-9]+)?)`)
 
 type Updater struct {
 	store     *store.Store
@@ -57,30 +60,36 @@ func New(s *store.Store, binDir string) *Updater {
 	}
 }
 
-func (u *Updater) GetBinDir() string {
-	return u.binDir
-}
-
+// detectLocalBinVersion 绝对真实物理探测：杜绝任何“已就绪”等歧义词
 func detectLocalBinVersion(binPath string) string {
-	if _, err := os.Stat(binPath); err != nil {
+	info, err := os.Stat(binPath)
+	if err != nil {
 		return "未安装"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, binPath, "version").Output()
-	if err == nil {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) > 0 {
-			fields := strings.Fields(lines[0])
-			for i, f := range fields {
-				if f == "version" && i+1 < len(fields) {
-					return "v" + strings.TrimPrefix(fields[i+1], "v")
-				}
-			}
-			return lines[0]
-		}
+	// 校验文件非空且具备基础可执行权限
+	if info.Size() == 0 {
+		return "文件损坏 (0字节)"
 	}
-	return "已就绪"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, binPath, "version")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Warn("failed to execute local sing-box binary", "path", binPath, "err", err, "out", string(out))
+		return "执行异常 (文件损坏或缺少动态库)"
+	}
+
+	raw := strings.TrimSpace(string(out))
+	if matches := verExtractRegex.FindStringSubmatch(raw); len(matches) > 1 {
+		return "v" + strings.TrimPrefix(matches[1], "v")
+	}
+
+	if len(raw) > 0 {
+		return strings.Split(raw, "\n")[0]
+	}
+	return "版本未知"
 }
 
 func (u *Updater) GetStatus(ctx context.Context) UpdaterStatus {
@@ -90,6 +99,11 @@ func (u *Updater) GetStatus(ctx context.Context) UpdaterStatus {
 	stableBin := filepath.Join(u.binDir, "sing-box-stable")
 	alphaBin := filepath.Join(u.binDir, "sing-box-alpha")
 
+	lastCheckStr := "-"
+	if !u.lastCheck.IsZero() {
+		lastCheckStr = u.lastCheck.Format("2006-01-02 15:04:05")
+	}
+
 	return UpdaterStatus{
 		IsRunning:           u.isRunning,
 		BinDir:              u.binDir,
@@ -97,7 +111,7 @@ func (u *Updater) GetStatus(ctx context.Context) UpdaterStatus {
 		LocalAlphaVersion:   detectLocalBinVersion(alphaBin),
 		RemoteStableVersion: u.store.GetSetting(ctx, "singbox_remote_stable_ver", "-"),
 		RemoteAlphaVersion:  u.store.GetSetting(ctx, "singbox_remote_alpha_ver", "-"),
-		LastCheck:           u.lastCheck.Format("2006-01-02 15:04:05"),
+		LastCheck:           lastCheckStr,
 		LastError:           u.lastError,
 	}
 }
@@ -109,7 +123,8 @@ func (u *Updater) TriggerUpdate(ctx context.Context) {
 		return
 	}
 	u.isRunning = true
-	u.lastError = "准备拉取中..."
+	// 关键优化：清空上次错误，拉取中不要把临时提示塞进 lastError 导致前端误报异常！
+	u.lastError = ""
 	u.mu.Unlock()
 
 	go func() {
@@ -160,7 +175,7 @@ func (u *Updater) getHTTPClient(ctx context.Context) (*http.Client, error) {
 		if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
 			dialer, err := proxy.FromURL(proxyURL, proxy.Direct)
 			if err != nil {
-				return nil, fmt.Errorf("SOCKS5 代理拨号器创建失败: %w", err)
+				return nil, fmt.Errorf("SOCKS5 代理创建失败: %w", err)
 			}
 			transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return dialer.Dial(network, addr)
@@ -182,7 +197,7 @@ func (u *Updater) runUpdateFlow() error {
 	}
 
 	if err := os.MkdirAll(u.binDir, 0755); err != nil {
-		return fmt.Errorf("无法创建下载目录 %s: %w", u.binDir, err)
+		return fmt.Errorf("无法创建下载目录: %w", err)
 	}
 
 	token := u.store.GetSetting(ctx, "git_token", "")
@@ -195,12 +210,12 @@ func (u *Updater) runUpdateFlow() error {
 
 	var errs []string
 	if channel == "stable" || channel == "all" {
-		if err := u.downloadChannel(ctx, "stable", u.binDir, token, mirror, proxyClient); err != nil {
+		if err := u.downloadChannel(ctx, "stable", token, mirror, proxyClient); err != nil {
 			errs = append(errs, "Stable: "+err.Error())
 		}
 	}
 	if channel == "alpha" || channel == "all" {
-		if err := u.downloadChannel(ctx, "alpha", u.binDir, token, mirror, proxyClient); err != nil {
+		if err := u.downloadChannel(ctx, "alpha", token, mirror, proxyClient); err != nil {
 			errs = append(errs, "Alpha: "+err.Error())
 		}
 	}
@@ -211,13 +226,12 @@ func (u *Updater) runUpdateFlow() error {
 	return nil
 }
 
-func (u *Updater) downloadChannel(ctx context.Context, channel string, binDir string, token string, mirror string, proxyClient *http.Client) error {
+func (u *Updater) downloadChannel(ctx context.Context, channel string, token string, mirror string, proxyClient *http.Client) error {
 	apiURL := "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 	if channel == "alpha" {
 		apiURL = "https://api.github.com/repos/SagerNet/sing-box/releases"
 	}
 
-	// 1. 控制流（API）：强制使用配置的代理 Client
 	req, _ := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if token != "" {
 		req.Header.Set("Authorization", "token "+token)
@@ -225,13 +239,13 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, binDir st
 
 	resp, err := proxyClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("请求 GitHub API 失败 (请检查代理或直连): %w", err)
+		return fmt.Errorf("请求 GitHub API 失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API 拒绝 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
+		return fmt.Errorf("API 访问被拒 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var targetTag, downloadURL string
@@ -284,26 +298,25 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, binDir st
 	}
 
 	if downloadURL == "" {
-		return fmt.Errorf("未找到适用于 linux-%s 的包", runtime.GOARCH)
+		return fmt.Errorf("未找到适用于 linux-%s 的安装包", runtime.GOARCH)
 	}
 
 	targetBinName := "sing-box-stable"
 	if channel == "alpha" {
 		targetBinName = "sing-box-alpha"
 	}
-	targetPath := filepath.Join(binDir, targetBinName)
+	targetPath := filepath.Join(u.binDir, targetBinName)
 
+	// 本地存在且运行正常，版本相同则直接跳过
 	if detectLocalBinVersion(targetPath) == targetTag {
 		slog.Info("sing-box is already up to date", "channel", channel, "version", targetTag)
 		return nil
 	}
 
-	// 2. 数据流（Asset）：智能级联策略
-	// 策略：镜像前缀走直连高速下载；若未配或失败，则自动回退至代理 Client 下载
 	var dlResp *http.Response
 	if mirror != "" {
 		mirroredURL := mirror + "/" + downloadURL
-		slog.Info("trying mirror download for sing-box", "channel", channel, "url", mirroredURL)
+		slog.Info("trying mirror download", "channel", channel, "url", mirroredURL)
 		directClient := &http.Client{Timeout: 90 * time.Second}
 		dlReq, _ := http.NewRequestWithContext(ctx, "GET", mirroredURL, nil)
 		res, dErr := directClient.Do(dlReq)
@@ -322,11 +335,11 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, binDir st
 		dlReq, _ := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
 		res, err := proxyClient.Do(dlReq)
 		if err != nil {
-			return fmt.Errorf("下载二进制包失败: %w", err)
+			return fmt.Errorf("下载安装包失败: %w", err)
 		}
 		if res.StatusCode != 200 {
 			res.Body.Close()
-			return fmt.Errorf("下载请求被拒绝: HTTP %d", res.StatusCode)
+			return fmt.Errorf("下载被拒绝 (HTTP %d)", res.StatusCode)
 		}
 		dlResp = res
 	}
@@ -365,7 +378,7 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, binDir st
 	}
 
 	if !found {
-		return errors.New("压缩包内未找到名为 'sing-box' 的二进制可执行文件")
+		return errors.New("压缩包内未找到名为 'sing-box' 的可执行文件")
 	}
 	return nil
 }

@@ -77,16 +77,17 @@
     }
   }
 
-  // 状态判定派生
-  let isStableSynced = $derived.by(() => {
-    const s = ws.updaterStatus;
-    return s && s.local_stable_version !== '未安装' && s.remote_stable_version !== '-' && s.local_stable_version === s.remote_stable_version;
-  });
+  // 状态语义辅助函数
+  function getVerStatus(local: string | undefined, remote: string | undefined) {
+    if (!local || local === '未安装') return { text: '未安装', color: 'text-zinc-400', tag: null };
+    if (local.includes('异常') || local.includes('损坏')) return { text: local, color: 'text-rose-500 font-bold', tag: '异常' };
+    if (!remote || remote === '-') return { text: local, color: 'text-zinc-800 dark:text-zinc-200', tag: null };
+    if (local === remote) return { text: local, color: 'text-emerald-600 dark:text-emerald-400 font-bold', tag: '✓ 最新' };
+    return { text: local, color: 'text-amber-600 dark:text-amber-400 font-bold', tag: '可升级 ↗' };
+  }
 
-  let isAlphaSynced = $derived.by(() => {
-    const s = ws.updaterStatus;
-    return s && s.local_alpha_version !== '未安装' && s.remote_alpha_version !== '-' && s.local_alpha_version === s.remote_alpha_version;
-  });
+  let stableInfo = $derived.by(() => getVerStatus(ws.updaterStatus?.local_stable_version, ws.updaterStatus?.remote_stable_version));
+  let alphaInfo = $derived.by(() => getVerStatus(ws.updaterStatus?.local_alpha_version, ws.updaterStatus?.remote_alpha_version));
 </script>
 
 {#if open}
@@ -163,9 +164,13 @@
               </div>
 
               <!-- 内核运行与版本矩阵卡片 -->
-              <div class="rounded-xl border border-blue-200/60 bg-blue-50/40 p-3.5 dark:border-blue-900/40 dark:bg-blue-950/20 space-y-3">
-                <div class="flex items-center justify-between border-b border-blue-100 pb-2 dark:border-blue-900/50">
-                  <span class="font-semibold text-blue-800 dark:text-blue-300 text-xs">Sing-box 内核版本对照</span>
+              <!-- 找到 SettingsDrawer.svelte 中的内核运行与版本矩阵卡片，替换为以下重构版： -->
+              <div class="rounded-2xl border border-blue-200/60 bg-blue-50/40 p-3.5 dark:border-blue-900/40 dark:bg-blue-950/20 space-y-3">
+                <div class="flex items-center justify-between border-b border-blue-100/70 pb-2.5 dark:border-blue-900/50">
+                  <div class="flex items-center gap-1.5">
+                    <span class="font-bold text-blue-900 dark:text-blue-200 text-xs">Sing-box 内核版本对照</span>
+                    <span class="text-[10px] text-blue-500/80 font-mono">(双轨)</span>
+                  </div>
                   <button
                     disabled={ws.updaterStatus?.is_running}
                     onclick={handleTriggerUpdate}
@@ -174,45 +179,90 @@
                   >
                     {#if ws.updaterStatus?.is_running}
                       <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
-                      <span>拉取同步中...</span>
+                      <span>同步中...</span>
                     {:else}
                       <span>检查并拉取</span>
                     {/if}
                   </button>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 text-xs font-mono">
-                  <!-- 本地物理版本（带对齐打勾与可更新小胶囊） -->
-                  <div class="bg-white/60 dark:bg-zinc-900/60 p-2.5 rounded-lg border border-blue-100 dark:border-blue-900/30 space-y-1.5">
-                    <span class="text-[10px] uppercase font-bold text-zinc-400 block">本地物理版本</span>
+                <!-- 按版本通道横向卡片展示：彻底消除截断，呼吸感拉满 -->
+                <div class="space-y-2.5">
+                  
+                  <!-- 1. 正式版 (Stable) 对比卡片 -->
+                  <div class="rounded-xl border border-blue-100/80 bg-white/80 p-3 shadow-2xs dark:border-blue-900/40 dark:bg-zinc-900/70 space-y-2">
                     <div class="flex items-center justify-between">
-                      <span class="text-zinc-600 dark:text-zinc-300">Stable: <strong class="{ws.updaterStatus?.local_stable_version === '未安装' ? 'text-zinc-400' : 'text-zinc-900 dark:text-zinc-100'}">{ws.updaterStatus?.local_stable_version || '未安装'}</strong></span>
-                      {#if isStableSynced}
-                        <span class="px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 text-[9px] font-bold">✓</span>
+                      <span class="text-xs font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5">
+                        <span class="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_6px_#10b981]"></span>
+                        <span>稳定版 (Stable)</span>
+                      </span>
+                      {#if stableInfo.tag === '✓ 最新'}
+                        <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 text-[10px] font-bold">
+                          {stableInfo.tag}
+                        </span>
+                      {:else if stableInfo.tag}
+                        <span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/80 dark:text-amber-300 text-[10px] font-bold">
+                          {stableInfo.tag}
+                        </span>
                       {/if}
                     </div>
-                    <div class="flex items-center justify-between">
-                      <span class="text-zinc-600 dark:text-zinc-300">Alpha: <strong class="{ws.updaterStatus?.local_alpha_version === '未安装' ? 'text-zinc-400' : 'text-zinc-900 dark:text-zinc-100'}">{ws.updaterStatus?.local_alpha_version || '未安装'}</strong></span>
-                      {#if isAlphaSynced}
-                        <span class="px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 text-[9px] font-bold">✓</span>
-                      {/if}
+
+                    <div class="grid grid-cols-2 gap-2 text-xs font-mono pt-0.5">
+                      <div class="bg-zinc-50 dark:bg-zinc-950/60 p-2 rounded-lg border border-zinc-200/50 dark:border-zinc-800/50">
+                        <span class="text-[10px] text-zinc-400 block mb-0.5">本地</span>
+                        <strong class="text-xs font-bold {stableInfo.color} block break-all">
+                          {stableInfo.text}
+                        </strong>
+                      </div>
+                      <div class="bg-blue-50/50 dark:bg-blue-950/30 p-2 rounded-lg border border-blue-100/60 dark:border-blue-900/40">
+                        <span class="text-[10px] text-blue-500 block mb-0.5">GitHub</span>
+                        <strong class="text-xs font-bold text-blue-900 dark:text-blue-200 block break-all">
+                          {ws.updaterStatus?.remote_stable_version || '-'}
+                        </strong>
+                      </div>
                     </div>
                   </div>
 
-                  <!-- 远程最新版本 -->
-                  <div class="bg-white/60 dark:bg-zinc-900/60 p-2.5 rounded-lg border border-blue-100 dark:border-blue-900/30 space-y-1.5">
-                    <span class="text-[10px] uppercase font-bold text-blue-500 block">GitHub 远端版本</span>
-                    <div>Stable: <strong class="text-blue-900 dark:text-blue-200">{ws.updaterStatus?.remote_stable_version || '-'}</strong></div>
-                    <div>Alpha: <strong class="text-blue-900 dark:text-blue-200">{ws.updaterStatus?.remote_alpha_version || '-'}</strong></div>
+                  <!-- 2. 尝鲜版 (Alpha) 对比卡片 -->
+                  <div class="rounded-xl border border-blue-100/80 bg-white/80 p-3 shadow-2xs dark:border-blue-900/40 dark:bg-zinc-900/70 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-bold text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5">
+                        <span class="h-2 w-2 rounded-full bg-indigo-500 shadow-[0_0_6px_#6366f1]"></span>
+                        <span>开发版</span>
+                      </span>
+                      {#if alphaInfo.tag === '✓ 最新'}
+                        <span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 text-[10px] font-bold">
+                          {alphaInfo.tag}
+                        </span>
+                      {:else if alphaInfo.tag}
+                        <span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/80 dark:text-amber-300 text-[10px] font-bold">
+                          {alphaInfo.tag}
+                        </span>
+                      {/if}
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 text-xs font-mono pt-0.5">
+                      <div class="bg-zinc-50 dark:bg-zinc-950/60 p-2 rounded-lg border border-zinc-200/50 dark:border-zinc-800/50">
+                        <span class="text-[10px] text-zinc-400 block mb-0.5">本地</span>
+                        <strong class="text-xs font-bold {alphaInfo.color} block break-all">
+                          {alphaInfo.text}
+                        </strong>
+                      </div>
+                      <div class="bg-blue-50/50 dark:bg-blue-950/30 p-2 rounded-lg border border-blue-100/60 dark:border-blue-900/40">
+                        <span class="text-[10px] text-blue-500 block mb-0.5">GitHub</span>
+                        <strong class="text-xs font-bold text-blue-900 dark:text-blue-200 block break-all">
+                          {ws.updaterStatus?.remote_alpha_version || '-'}
+                        </strong>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 <!-- 优化沙箱显示 -->
                 {#if ws.updaterStatus?.bin_dir}
                   {@const fullPath = ws.updaterStatus.bin_dir}
-                  <!-- 智能截取路径最后两级（例如展示 .../data/bin 或 .../.per/bin） -->
                   {@const displayRel = fullPath.split('/').slice(-2).join('/')}
-                  <div class="flex items-center justify-between text-[10px] font-mono text-zinc-400 pt-0.5">
+                  <div class="flex items-center justify-between text-[10px] font-mono text-zinc-400 pt-1">
                     <span class="truncate" title={fullPath}>
                       沙箱目录: <span class="text-zinc-600 dark:text-zinc-300 font-semibold font-mono">{displayRel}</span>
                     </span>
@@ -220,21 +270,24 @@
                   </div>
                 {/if}
 
-                <!-- 底部状态与红框结果指示徽章 -->
+                <!-- 底部状态指示条 -->
                 <div class="flex items-center justify-between text-[11px] font-mono text-zinc-500 pt-2 border-t border-blue-100/60 dark:border-blue-900/30">
-                  <span>上次检查: {ws.updaterStatus?.last_check || '-'}</span>
+                  <span>上次检查: {ws.updaterStatus?.last_check && ws.updaterStatus.last_check !== '-' && !ws.updaterStatus.last_check.startsWith('0001') ? ws.updaterStatus.last_check : '从未检查'}</span>
 
-                  <!-- 优雅的结果呈现徽章 -->
-                  {#if ws.updaterStatus?.last_error}
-                    <span class="px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950/60 dark:text-rose-400 dark:border-rose-900/50 font-bold text-[10px] truncate max-w-50" title={ws.updaterStatus.last_error}>
-                      ⚠️ 更新存在异常
+                  {#if ws.updaterStatus?.is_running}
+                    <span class="text-blue-600 dark:text-blue-400 font-bold text-[10px] flex items-center gap-1 animate-pulse">
+                      <span>● 正在同步远端资产...</span>
                     </span>
-                  {:else if isStableSynced && isAlphaSynced}
+                  {:else if ws.updaterStatus?.last_error}
+                    <span class="px-2 py-0.5 rounded-md bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950/60 dark:text-rose-400 dark:border-rose-900/50 font-bold text-[10px] truncate max-w-50" title={ws.updaterStatus.last_error}>
+                      ⚠️ 同步失败
+                    </span>
+                  {:else if ws.updaterStatus?.local_stable_version && ws.updaterStatus.local_stable_version !== '未安装'}
                     <span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-900/50 font-bold text-[10px] flex items-center gap-1 shadow-2xs">
-                      <span>✓ 双轨同步就绪</span>
+                      <span>✓ 资产运行就绪</span>
                     </span>
                   {:else}
-                    <span class="text-zinc-400 text-[10px]">待检查或已更新</span>
+                    <span class="text-zinc-400 text-[10px]">待手动或自动拉取</span>
                   {/if}
                 </div>
               </div>
