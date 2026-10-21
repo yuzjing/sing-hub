@@ -12,17 +12,23 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Listen   string `toml:"listen"`    // 双栈监听，默认 ":8080"
-	DataDir  string `toml:"data_dir"`  // 数据持久化目录，默认 "./data"
-	LogLevel string `toml:"log_level"` // 启动初始日志级别，默认 "info"
+	Listen   string `toml:"listen"`
+	DataDir  string `toml:"data_dir"`
+	LogLevel string `toml:"log_level"`
 }
 
 // Default 返回安全的默认配置
 func Default() Config {
+	// 核心：若容器注入了 DATA_DIR（如 /data），优先使用容器环境变量；容器外裸跑回退到 ./data
+	dataDir := "./data"
+	if envDir := os.Getenv("DATA_DIR"); envDir != "" {
+		dataDir = envDir
+	}
+
 	return Config{
 		Server: ServerConfig{
 			Listen:   ":8080",
-			DataDir:  "./data",
+			DataDir:  dataDir,
 			LogLevel: "info",
 		},
 	}
@@ -34,7 +40,6 @@ func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// 文件不存在时写出一份标准样本供运维参考
 			out, _ := toml.Marshal(cfg)
 			_ = os.WriteFile(path, out, 0644)
 			return cfg, nil
@@ -45,5 +50,11 @@ func Load(path string) (Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return cfg, err
 	}
+
+	// 容错兜底：若 TOML 里没有显式写 data_dir 或为空，回退到默认
+	if cfg.Server.DataDir == "" {
+		cfg.Server.DataDir = Default().Server.DataDir
+	}
+
 	return cfg, nil
 }

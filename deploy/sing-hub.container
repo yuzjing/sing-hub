@@ -1,12 +1,23 @@
 [Unit]
-Description=Sing-Box Configuration Hub (Rootless)
+Description=Sing-Box Configuration Hub (Rootless Quadlet)
 After=network-online.target
 
 [Container]
 Image=localhost/sing-hub:latest
 ContainerName=sing-hub
+
+
 Volume=%h/data/sing-hub:/data:Z
+
+
+Environment=TZ=Asia/Shanghai
+
+
 PublishPort=8080:8080
+
+
+Exec=sing-hub -config /data/config.toml
+
 Restart=always
 
 [Install]
