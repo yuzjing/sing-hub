@@ -52,7 +52,8 @@
         enablePush = editProfile.capabilities?.enable_push ?? true;
       } else {
         id = 'prof-' + Date.now().toString(36);
-        name = '';
+        // 核心优化：新建时给一个默认名称，防止空值拦截
+        name = '新建方案配方';
         token = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
         tagsStr = 'default';
         description = '';
@@ -75,7 +76,7 @@
       token: token.trim(),
       tags: tagsStr.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
       description: description.trim(),
-      sing_box_version: singBoxVersion,
+      sing_box_version: singBoxVersion.trim() || '1.10.0',
       enable_subscribe: enableSubscribe,
       enable_ping: enablePing,
       enable_push: enablePush,
@@ -99,7 +100,9 @@
       <div class="space-y-3.5 text-xs">
         <div class="grid grid-cols-2 gap-3">
           <label class="block">
-            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">方案名称</span>
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+              方案名称 <span class="text-rose-500 font-bold">*</span>
+            </span>
             <input
               bind:value={name}
               placeholder="如: 全网分流出海方案"
@@ -107,7 +110,6 @@
             />
           </label>
 
-          <!-- 关键补齐：方案标签输入 -->
           <label class="block">
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">方案标签 (逗号分隔)</span>
             <input
@@ -132,7 +134,7 @@
             <input
               bind:value={singBoxVersion}
               placeholder="1.10.0"
-              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950"
+              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
         </div>

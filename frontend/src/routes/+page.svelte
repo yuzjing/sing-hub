@@ -141,8 +141,9 @@
 
 <div class="flex h-screen w-screen overflow-hidden bg-zinc-100 text-zinc-900 transition-colors duration-200 dark:bg-zinc-950 dark:text-zinc-100 font-sans">
   {#if ws.toastMessage}
-    <div class="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full border border-emerald-500/30 bg-zinc-900/90 dark:bg-zinc-900/95 px-3.5 py-1.5 shadow-lg backdrop-blur-md text-xs text-white">
-      <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>
+    {@const isErr = ws.toastMessage.type === 'error'}
+    <div class="fixed top-5 left-1/2 -translate-x-1/2 z-60 flex items-center gap-2 rounded-full border {isErr ? 'border-rose-500/50 bg-rose-950/90 text-rose-200' : 'border-emerald-500/30 bg-zinc-900/90 text-white'} px-4 py-2 shadow-2xl backdrop-blur-md text-xs font-medium animate-in fade-in slide-in-from-top-2 duration-150">
+      <span class="h-2 w-2 rounded-full {isErr ? 'bg-rose-500 shadow-[0_0_8px_#f43f5e]' : 'bg-emerald-400 shadow-[0_0_6px_#34d399]'}"></span>
       <span>{ws.toastMessage.text}</span>
     </div>
   {/if}
