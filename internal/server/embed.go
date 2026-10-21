@@ -12,12 +12,18 @@ import (
 //go:embed dist
 var distFS embed.FS
 
-// RegisterStatic 挂载静态 SPA 资源
+// RegisterStatic 挂载静态 SPA 资源 (杜绝 301 重定向死循环)
 func (s *Server) RegisterStatic() {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		slog.Error("failed to create static sub fs", "err", err)
 		return
+	}
+
+	// 提前读入 index.html 缓存，SPA 路由直出
+	indexHTML, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		slog.Warn("index.html not found in dist, static frontend may fail", "err", err)
 	}
 
 	fileServer := http.FileServer(http.FS(sub))
@@ -29,24 +35,28 @@ func (s *Server) RegisterStatic() {
 		}
 
 		path := strings.TrimPrefix(r.URL.Path, "/")
-		// 1. 如果请求的是真实物理文件（如 /favicon.png、/_app/immutable/...），且不是空路径
+
+		// 1. 如果请求的是具体的静态物理文件（如 _app/immutable/...、favicon.png）
 		if path != "" {
 			if f, err := sub.Open(path); err == nil {
+				stat, statErr := f.Stat()
 				_ = f.Close()
-				fileServer.ServeHTTP(w, r)
-				return
+				// 必须是普通文件而非目录，直接交给 fileServer 输出
+				if statErr == nil && !stat.IsDir() {
+					fileServer.ServeHTTP(w, r)
+					return
+				}
 			}
 		}
 
-		// 2. 访问根路径 / 或前端客户端路由时，统一送给 index.html
-		if indexFile, err := sub.Open("index.html"); err == nil {
-			_ = indexFile.Close()
-			r.URL.Path = "/index.html"
-			fileServer.ServeHTTP(w, r)
+		// 2. 访问根路径 / 或前端客户端路由 (如 /studio, /foundry 等)，直接吐出 index.html 内容
+		if len(indexHTML) > 0 {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(indexHTML)
 			return
 		}
 
-		slog.Warn("static index.html not found in embedded dist", "path", r.URL.Path)
 		http.NotFound(w, r)
 	})
 }
