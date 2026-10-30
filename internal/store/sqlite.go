@@ -47,7 +47,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	CREATE TABLE IF NOT EXISTS components (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
-		category TEXT NOT NULL DEFAULT 'routing',
+		category TEXT NOT NULL DEFAULT 'io',
 		scope_tag TEXT NOT NULL DEFAULT 'universal',
 		sing_box_version TEXT NOT NULL DEFAULT 'universal',
 		mount_path TEXT NOT NULL,

@@ -7,7 +7,7 @@
   import Icon from '$lib/components/Icon.svelte';
   import ParamBinder from '$lib/components/ParamBinder.svelte';
   import TagFilter from '$lib/components/TagFilter.svelte';
-   import { SvelteSet } from 'svelte/reactivity';
+  import { SvelteSet } from 'svelte/reactivity';
 
   interface Props {
     isProfileManageMode?: boolean;
@@ -47,7 +47,6 @@
     return activeLinterTab === 'stable' ? r.stable : r.alpha;
   });
 
-  // 方案标签统计与多选
   let selectedFilterTags = $state<string[]>([]);
   let tagCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
@@ -63,6 +62,40 @@
   let expandedModuleId = $state<string | null>(null);
   let inlineDraftParams = $state<Record<string, string | number | boolean>>({});
   let isInlineDirty = $state(false);
+
+  // 与母版完全共享的色彩系统
+  const HASH_PALETTES = [
+    { bg: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/25 dark:text-emerald-300 dark:border-emerald-500/30', dot: 'bg-emerald-500' },
+    { bg: 'bg-blue-500/10 text-blue-700 border-blue-500/25 dark:text-blue-300 dark:border-blue-500/30', dot: 'bg-blue-500' },
+    { bg: 'bg-purple-500/10 text-purple-700 border-purple-500/25 dark:text-purple-300 dark:border-purple-500/30', dot: 'bg-purple-500' },
+    { bg: 'bg-amber-500/10 text-amber-700 border-amber-500/25 dark:text-amber-300 dark:border-amber-500/30', dot: 'bg-amber-500' },
+    { bg: 'bg-cyan-500/10 text-cyan-700 border-cyan-500/25 dark:text-cyan-300 dark:border-cyan-500/30', dot: 'bg-cyan-500' },
+    { bg: 'bg-rose-500/10 text-rose-700 border-rose-500/25 dark:text-rose-300 dark:border-rose-500/30', dot: 'bg-rose-500' },
+    { bg: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/25 dark:text-indigo-300 dark:border-indigo-500/30', dot: 'bg-indigo-500' }
+  ];
+
+  function getMountMeta(path: string | undefined): { label: string; pillClass: string; dotClass: string } {
+    if (!path) return { label: 'PATH', pillClass: 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700', dotClass: 'bg-zinc-400' };
+
+    const lower = path.toLowerCase();
+    if (lower.startsWith('inbound')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[0].bg, dotClass: HASH_PALETTES[0].dot };
+    if (lower.startsWith('outbound')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[1].bg, dotClass: HASH_PALETTES[1].dot };
+    if (lower.startsWith('endpoint')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[2].bg, dotClass: HASH_PALETTES[2].dot };
+    if (lower.startsWith('route')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[3].bg, dotClass: HASH_PALETTES[3].dot };
+    if (lower.startsWith('dns')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[4].bg, dotClass: HASH_PALETTES[4].dot };
+
+    let hash = 0;
+    for (let i = 0; i < path.length; i++) {
+      hash = (hash << 5) - hash + path.charCodeAt(i);
+      hash |= 0;
+    }
+    const idx = Math.abs(hash) % HASH_PALETTES.length;
+    return {
+      label: path.toUpperCase(),
+      pillClass: HASH_PALETTES[idx].bg,
+      dotClass: HASH_PALETTES[idx].dot
+    };
+  }
 
   function safeParse(raw: string | undefined): Record<string, string | number | boolean> {
     if (!raw) return {};
@@ -192,7 +225,6 @@
       </div>
     </div>
 
-    <!-- 方案标签多选筛选 (带项目数量) -->
     <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} />
 
     <div class="flex-1 overflow-y-auto p-3 space-y-2">
@@ -212,7 +244,7 @@
                   if ((e.target as HTMLInputElement).checked) selectedProfileIds = [...selectedProfileIds, p.id];
                   else selectedProfileIds = selectedProfileIds.filter((id: string) => id !== p.id);
                 }}
-                class="rounded h-3.5 w-3.5 cursor-pointer"
+                class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
               />
             {/if}
             <button onclick={() => ws.selectProfile(p.id)} type="button" class="truncate text-left flex-1 cursor-pointer">
@@ -254,21 +286,25 @@
 
   <!-- 中间流水线 -->
   <main class="flex flex-1 min-w-0 flex-col overflow-hidden border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-    <div class="flex h-12 shrink-0 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-zinc-400">当前方案:</span>
-        <strong class="text-sm text-zinc-900 dark:text-zinc-100">{ws.activeProfile?.name || '请选择方案'}</strong>
+    <div class="flex h-12 shrink-0 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800 gap-4">
+      <div class="flex items-center gap-2 min-w-0 flex-1">
+        <span class="text-xs text-zinc-400 shrink-0">当前方案:</span>
+        <strong class="text-sm text-zinc-900 dark:text-zinc-100 truncate max-w-50" title={ws.activeProfile?.name}>
+          {ws.activeProfile?.name || '请选择方案'}
+        </strong>
         {#if ws.activeProfile?.sing_box_version}
-          <span class="rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 font-mono text-[11px] font-medium text-zinc-500">{ws.activeProfile.sing_box_version}</span>
+          <span class="rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 font-mono text-[11px] font-medium text-zinc-500 shrink-0">
+            {ws.activeProfile.sing_box_version}
+          </span>
         {/if}
       </div>
 
       {#if ws.activeProfile}
-        <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-2.5 shrink-0">
           <button
             onclick={onOpenMount}
             type="button"
-            class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 cursor-pointer transition flex items-center gap-1.5"
+            class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap"
           >
             <Icon name="plus" size={14} />
             <span>挑选装配</span>
@@ -276,7 +312,7 @@
           <button
             onclick={() => ws.triggerCompile()}
             type="button"
-            class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5"
+            class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap"
           >
             <Icon name="check" size={14} />
             <span>{ws.isCompiling ? '编译中...' : '编译保存'}</span>
@@ -288,15 +324,15 @@
     <div class="flex-1 overflow-y-auto p-5 space-y-4">
       <!-- 拓扑感知卡片 -->
       {#if ws.activeProfile}
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60 space-y-2">
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60 space-y-2 min-w-0">
             <span class="text-xs font-bold text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5">
               <Icon name="server" size={14} color="blue" />
               <span>配置引用的节点集群 ({referencedNodes.length})</span>
             </span>
             <div class="flex flex-wrap gap-2 pt-1">
               {#each referencedNodes as dev (dev.id)}
-                <span class="px-2.5 py-1 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 text-xs font-mono font-medium shadow-2xs">
+                <span class="px-2.5 py-1 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 text-xs font-mono font-medium shadow-2xs truncate max-w-45">
                   {dev.name}
                 </span>
               {:else}
@@ -305,15 +341,15 @@
             </div>
           </div>
 
-          <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60 space-y-2">
+          <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60 space-y-2 min-w-0">
             <span class="text-xs font-bold text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5">
               <Icon name="terminal" size={14} color="emerald" />
               <span>下发推送目标实例 ({targetDevices.length})</span>
             </span>
             <div class="flex flex-wrap gap-2 pt-1">
               {#each targetDevices as dev (dev.id)}
-                <span class="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 text-xs font-mono font-medium shadow-2xs">
-                  {dev.name} ({dev.ssh_user}@{dev.ssh_host || dev.endpoints[0]})
+                <span class="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 text-xs font-mono font-medium shadow-2xs truncate max-w-45" title="{dev.name} ({dev.ssh_user}@{dev.ssh_host || dev.endpoints[0]})">
+                  {dev.name}
                 </span>
               {:else}
                 <span class="text-xs text-zinc-400 italic">尚未指派给任何节点</span>
@@ -335,32 +371,54 @@
           {@const tmplVars = getTemplateVars(item.template)}
           {@const fieldMap = detectTemplateFieldMap(item.template?.payload_tmpl || '')}
           {@const isExpanded = expandedModuleId === item.module.id}
+          {@const mountMeta = getMountMeta(item.template?.mount_path)}
 
-          <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-5 shadow-xs hover:shadow-md hover:border-zinc-300 dark:border-zinc-800/90 dark:bg-zinc-900/60 dark:hover:border-zinc-700 transition-all space-y-4">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-3">
-                <span class="font-mono text-sm font-bold text-zinc-400 dark:text-zinc-600">0{idx + 1}</span>
-                <span class="text-base font-bold text-zinc-900 dark:text-zinc-100">{item.module.name}</span>
-                <span class="rounded-md bg-zinc-200/80 px-2 py-0.5 font-mono text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                  {item.template?.mount_path || '自定义路径'}
-                </span>
-                <span class="text-xs text-zinc-500 font-mono">
-                  母版: {item.template?.name || item.module.template_id}
-                </span>
+          <!-- 卡片外层：左侧附带 3.5px 语义色彩锚线，建立绝对对齐基准 -->
+          <div class="relative overflow-hidden rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-2xs hover:shadow-md hover:border-zinc-300 dark:border-zinc-800/90 dark:bg-zinc-900/60 dark:hover:border-zinc-700 transition-all space-y-3.5 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:{mountMeta.dotClass}">
+            
+            <!-- 统一基准线架构：两行齐头绝对对齐 -->
+            <div class="flex items-start justify-between gap-3 min-w-0 pl-1.5">
+              <div class="min-w-0 flex-1 space-y-2">
+                <!-- 第一行：序号徽标单色绝对统一（无论多少组件，始终保持工序严肃感） + 粗体标题 -->
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <span class="flex h-5.5 min-w-7 px-1.5 items-center justify-center rounded-md bg-zinc-900 text-zinc-100 dark:bg-zinc-100 dark:text-zinc-900 font-mono text-[11px] font-black shadow-2xs shrink-0 select-none">
+                    {String(idx + 1).padStart(2, '0')}
+                  </span>
+                  <span class="text-sm font-extrabold text-zinc-900 dark:text-zinc-100 truncate tracking-tight" title={item.module.name}>
+                    {item.module.name}
+                  </span>
+                </div>
+
+                <!-- 第二行：微拟态彩色挂载点 + 同色系微拟态母版胶囊 -->
+                <div class="flex items-center gap-2 flex-wrap text-xs">
+                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold tracking-wide {mountMeta.pillClass}">
+                    <span class="w-1.5 h-1.5 rounded-full {mountMeta.dotClass}"></span>
+                    <span>{item.template?.mount_path || 'path'}</span>
+                  </span>
+
+                  <span class="text-zinc-300 dark:text-zinc-700 text-xs select-none">›</span>
+
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border text-[10px] font-mono font-semibold truncate max-w-64 {mountMeta.pillClass} bg-opacity-40">
+                    <span class="opacity-60">母版:</span>
+                    <strong class="font-bold truncate">{item.template?.name || item.module.template_id}</strong>
+                  </span>
+                </div>
               </div>
 
-              <div class="flex items-center gap-1.5">
+              <!-- 右侧：强行保持单行抗收缩操作按钮 -->
+              <div class="flex items-center gap-1.5 shrink-0 pt-0.5">
                 <button
                   onclick={() => toggleInlineExpand(item.module)}
                   type="button"
-                  class="rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 cursor-pointer shadow-2xs transition"
+                  class="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer shadow-2xs transition whitespace-nowrap shrink-0"
                 >
-                  {isExpanded ? '收起配置' : '调整实参'}
+                  {isExpanded ? '收起' : '调整实参'}
                 </button>
-                <div class="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 ml-2">
-                  <button disabled={idx === 0} onclick={() => ws.moveModuleBinding(idx, 'up')} type="button" class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-white disabled:opacity-30 dark:hover:bg-zinc-700 cursor-pointer transition">↑</button>
-                  <button disabled={idx === ws.resolvedModuleBindings.length - 1} onclick={() => ws.moveModuleBinding(idx, 'down')} type="button" class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-white disabled:opacity-30 dark:hover:bg-zinc-700 cursor-pointer transition">↓</button>
-                  <button onclick={() => ws.detachModule(item.binding.id ?? item.module.id)} type="button" class="rounded px-2 py-1 text-zinc-400 hover:bg-white hover:text-rose-500 dark:hover:bg-zinc-700 cursor-pointer transition">
+                
+                <div class="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 shrink-0">
+                  <button disabled={idx === 0} onclick={() => ws.moveModuleBinding(idx, 'up')} type="button" class="rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white disabled:opacity-30 dark:hover:bg-zinc-700 cursor-pointer transition">↑</button>
+                  <button disabled={idx === ws.resolvedModuleBindings.length - 1} onclick={() => ws.moveModuleBinding(idx, 'down')} type="button" class="rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-white disabled:opacity-30 dark:hover:bg-zinc-700 cursor-pointer transition">↓</button>
+                  <button onclick={() => ws.detachModule(item.binding.id ?? item.module.id)} type="button" class="rounded px-1.5 py-0.5 text-zinc-400 hover:bg-white hover:text-rose-500 dark:hover:bg-zinc-700 cursor-pointer transition">
                     <Icon name="close" size={13} />
                   </button>
                 </div>
@@ -369,17 +427,17 @@
 
             <!-- 就地展开且内嵌 ParamBinder -->
             {#if isExpanded}
-              <div class="pt-4 border-t border-zinc-200/70 dark:border-zinc-800/80 space-y-4 animate-in fade-in duration-100">
+              <div class="pt-3 border-t border-zinc-200/70 dark:border-zinc-800/80 space-y-4 animate-in fade-in duration-100">
                 <div class="flex items-center justify-between">
                   <span class="text-xs font-bold text-zinc-700 dark:text-zinc-300">
                     实参赋值 (保存后右侧全局配置实时联动编译):
                   </span>
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 shrink-0">
                     {#if isInlineDirty}
                       <button
                         onclick={() => cancelInlineParams(item.module)}
                         type="button"
-                        class="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer font-medium px-2"
+                        class="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer font-medium px-2 whitespace-nowrap"
                       >
                         放弃修改
                       </button>
@@ -387,7 +445,7 @@
                     <button
                       onclick={() => saveInlineParams(item.module)}
                       type="button"
-                      class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition"
+                      class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition whitespace-nowrap"
                     >
                       应用实参
                     </button>
@@ -409,9 +467,9 @@
                 {#each Object.entries(currentParams) as [k, val] (k)}
                   {@const cleanK = k.replace(/^\./, '')}
                   {@const fieldName = fieldMap[cleanK] || fieldMap[k] || k}
-                  <span class="rounded-lg bg-white dark:bg-zinc-950 px-3 py-1 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5 shadow-2xs">
-                    <span class="text-blue-600 dark:text-blue-400 font-bold">{fieldName}:</span>
-                    <strong class="text-zinc-900 dark:text-zinc-100">{String(val)}</strong>
+                  <span class="rounded-lg bg-white dark:bg-zinc-950 px-2.5 py-1 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5 shadow-2xs truncate max-w-60">
+                    <span class="text-blue-600 dark:text-blue-400 font-bold shrink-0">{fieldName}:</span>
+                    <strong class="text-zinc-900 dark:text-zinc-100 truncate">{String(val)}</strong>
                   </span>
                 {:else}
                   <span class="text-xs text-zinc-400 italic">该成品使用纯静态或环境默认值。</span>
@@ -424,7 +482,7 @@
     </div>
 
     <!-- 底部状态条 -->
-    <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-5 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80">
+    <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-5 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80 shrink-0">
       <div class="flex items-center gap-4">
         <span class="flex items-center gap-2">
           <span class="h-2 w-2 rounded-full {ws.compileError ? 'bg-rose-500' : 'bg-emerald-500'}"></span>
@@ -442,7 +500,7 @@
   </main>
 
   <!-- 右侧编译镜像 -->
-  <section class="flex w-[42%] min-w-95 max-w-155 shrink-0 flex-col bg-zinc-50 dark:bg-zinc-950/90 relative">
+  <section class="flex w-[42%] min-w-88 shrink-0 flex-col bg-zinc-50 dark:bg-zinc-950/90 relative">
     <div class="flex h-12 shrink-0 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
       <div class="flex items-center gap-2">
         <span class="font-mono text-sm font-bold text-zinc-500 dark:text-zinc-400">CONFIG MIRROR</span>
@@ -546,8 +604,8 @@
       </div>
     </div>
 
-    <!-- 底部状态条 (高度增至 h-8) -->
-    <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-4 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80">
+    <!-- 底部状态条 -->
+    <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-4 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80 shrink-0">
       <span>
         {#if !ws.validationReport?.enabled}
           <span class="text-zinc-600 dark:text-zinc-300 font-bold">JSON 语法 100% 合法 (内核检测已关闭)</span>

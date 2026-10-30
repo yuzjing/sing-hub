@@ -1,7 +1,6 @@
 <!-- frontend/src/lib/components/ParamBinder.svelte -->
 <script lang="ts">
   import { ws } from '$lib/workspace.svelte';
-  import type { Device } from '$lib/types';
   import Icon from '$lib/components/Icon.svelte';
 
   interface Props {
@@ -63,14 +62,14 @@
   }
 </script>
 
-<div class="space-y-4">
+<div class="space-y-3.5">
   {#if templateVars.length > 4}
-    <div class="flex items-center justify-between gap-3 border-b border-zinc-100 pb-3 dark:border-zinc-800">
+    <div class="flex items-center justify-between gap-3 border-b border-zinc-100 pb-2.5 dark:border-zinc-800">
       <span class="text-xs text-zinc-500 font-mono">共 {templateVars.length} 个参数插孔</span>
       <input
         bind:value={searchFilter}
-        placeholder="搜索插孔或字段名..."
-        class="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 w-56 transition shadow-2xs"
+        placeholder="搜索插孔..."
+        class="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 w-44 transition shadow-2xs"
       />
     </div>
   {/if}
@@ -78,31 +77,34 @@
   {#if filteredVars.length === 0}
     <div class="text-sm text-zinc-500 italic py-6 text-center">无匹配的参数插孔。</div>
   {:else}
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 max-h-104 overflow-y-auto pr-2">
+    <!-- 优化栅格：在流式容器内自适应，避免小屏下被硬分 2 列挤爆 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-h-104 overflow-y-auto pr-1">
       {#each filteredVars as v (v)}
         {@const curVal = String(params[v] ?? '')}
         {@const isRef = curVal.startsWith('@node:')}
         {@const targetField = fieldMap[v]}
 
-        <div class="rounded-xl border border-zinc-200/80 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 space-y-2.5 transition-all hover:border-blue-300 dark:hover:border-blue-800">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2 truncate pr-2">
+        <div class="rounded-xl border border-zinc-200/80 bg-white p-3 shadow-xs dark:border-zinc-800 dark:bg-zinc-950/80 space-y-2 transition-all hover:border-blue-300 dark:hover:border-blue-800">
+          <div class="flex items-center justify-between gap-2">
+            <!-- 左侧：复合标签，即使在窄容器内也自动换行或舒展，绝不折断成省略号 -->
+            <div class="flex items-center gap-1.5 flex-wrap min-w-0 flex-1">
               {#if targetField}
-                <span class="rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-mono text-xs font-bold px-2 py-0.5 shrink-0 border border-blue-100 dark:border-blue-900/50">
+                <span class="rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-mono text-[11px] font-bold px-1.5 py-0.5 shrink-0 border border-blue-100 dark:border-blue-900/50">
                   "{targetField}"
                 </span>
-                <span class="text-zinc-300 dark:text-zinc-700 text-xs">←</span>
+                <span class="text-zinc-300 dark:text-zinc-700 text-[10px] shrink-0">←</span>
               {/if}
-              <span class="text-xs font-mono text-zinc-500 dark:text-zinc-400 truncate" title={v}>.{v}</span>
+              <span class="text-xs font-mono font-bold text-zinc-700 dark:text-zinc-300 truncate" title={v}>.{v}</span>
             </div>
 
+            <!-- 右侧：26px 紧凑单图标按钮 -->
             <button
               onclick={(e) => toggleMenu(v, e)}
               type="button"
-              class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium {isRef ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 font-bold border border-blue-200 dark:border-blue-900/60' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-transparent'} transition cursor-pointer shadow-2xs shrink-0"
+              title={isRef ? '已绑定节点属性，点击切换' : '点击引用设备节点属性 (@node:...)'}
+              class="flex h-6.5 w-6.5 items-center justify-center rounded-lg transition cursor-pointer shrink-0 shadow-2xs {isRef ? 'bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-400 dark:border-blue-800' : 'bg-zinc-100 text-zinc-500 hover:text-amber-600 hover:bg-amber-50 dark:bg-zinc-800/80 dark:text-zinc-400 dark:hover:bg-amber-950/40 dark:hover:text-amber-300 border border-transparent'}"
             >
-              <span>{isRef ? '🔗 已引用节点' : '⚡ 引用节点'}</span>
-              <span class="text-[9px] opacity-70">▾</span>
+              <span class="text-xs leading-none">{isRef ? '🔗' : '⚡'}</span>
             </button>
           </div>
 
@@ -110,8 +112,8 @@
             <input
               value={curVal}
               oninput={(e) => handleInputChange(v, (e.target as HTMLInputElement).value)}
-              placeholder={targetField ? `为 "${targetField}" 填入实参或引用` : '填入具体实参'}
-              class="w-full rounded-lg border {isRef ? 'border-blue-400/80 bg-blue-50/20 text-blue-700 dark:border-blue-800 dark:text-blue-300' : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100'} px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 transition shadow-2xs"
+              placeholder=""
+              class="w-full rounded-lg border {isRef ? 'border-blue-400/80 bg-blue-50/20 text-blue-700 dark:border-blue-800 dark:text-blue-300 font-bold' : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100'} px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 transition shadow-2xs"
             />
           </div>
         </div>

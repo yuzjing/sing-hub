@@ -20,10 +20,10 @@
 
   let id = $state('');
   let name = $state('');
-  let category = $state('routing');
-  let scopeTag = $state('universal');
-  let singBoxVersion = $state('universal');
-  let mountPath = $state('route.rules');
+  let category = $state('io');
+  let scopeTag = $state('');
+  let singBoxVersion = $state('');
+  let mountPath = $state('');
   let strategy = $state<Strategy>('append');
   let payloadTmpl = $state('{\n  \n}');
   let description = $state('');
@@ -33,9 +33,9 @@
       if (editComponent) {
         id = editComponent.id;
         name = editComponent.name;
-        category = editComponent.category;
+        category = editComponent.category || 'io';
         scopeTag = editComponent.scope_tag;
-        singBoxVersion = editComponent.sing_box_version || 'universal';
+        singBoxVersion = editComponent.sing_box_version || '';
         mountPath = editComponent.mount_path;
         strategy = editComponent.strategy;
         payloadTmpl = editComponent.payload_tmpl;
@@ -43,10 +43,10 @@
       } else {
         id = '';
         name = '';
-        category = 'routing';
-        scopeTag = 'universal';
-        singBoxVersion = 'universal';
-        mountPath = 'route.rules';
+        category = 'io'; // ✅ 默认排第一位的流量出入 (IO)
+        scopeTag = '';   // ✅ 清空初始值，使用 placeholder
+        singBoxVersion = '';
+        mountPath = '';  // ✅ 纯空，用户无需 Backspace
         strategy = 'append';
         payloadTmpl = '{\n  \n}';
         description = '';
@@ -60,7 +60,7 @@
       return;
     }
     if (!mountPath.trim()) {
-      ws.showToast('请输入挂载路径', 'error');
+      ws.showToast('请输入挂载路径 (如 inbounds, outbounds)', 'error');
       return;
     }
 
@@ -77,7 +77,7 @@
       id: finalId,
       name: name.trim(),
       category,
-      scope_tag: scopeTag.trim(),
+      scope_tag: scopeTag.trim() || 'universal',
       sing_box_version: singBoxVersion.trim() || 'universal',
       mount_path: mountPath.trim(),
       strategy,
@@ -100,23 +100,23 @@
         </button>
       </div>
 
-      <div class="space-y-3 text-xs">
+      <div class="space-y-3.5 text-xs">
         <div class="grid grid-cols-2 gap-3">
           <label class="block">
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">母版唯一 ID</span>
             <input
               bind:value={id}
               disabled={!!editComponent}
-              placeholder="如 tmpl-vless-outbound"
+              placeholder="留空自动生成"
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
             />
           </label>
 
           <label class="block">
-            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">显示名称</span>
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">显示名称 <span class="text-rose-500">*</span></span>
             <input
               bind:value={name}
-              placeholder="如: VLESS 出站通用模板"
+              placeholder=""
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
@@ -127,7 +127,7 @@
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">最低兼容内核版本</span>
             <input
               bind:value={singBoxVersion}
-              placeholder="如 1.14.0 或 universal"
+              placeholder="默认universal"
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
@@ -136,7 +136,7 @@
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">作用范围标签 (Scope)</span>
             <input
               bind:value={scopeTag}
-              placeholder="如 universal 或 routing"
+              placeholder="默认universal"
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
@@ -144,7 +144,7 @@
 
         <div class="grid grid-cols-3 gap-3">
           <label class="block">
-            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">分类</span>
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">所属分类</span>
             <select bind:value={category} class="w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 cursor-pointer">
               <option value="io">流量出入 (IO)</option>
               <option value="routing">路由决策 (Routing)</option>
@@ -154,12 +154,23 @@
           </label>
 
           <label class="block">
-            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">挂载路径</span>
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">挂载路径 <span class="text-rose-500">*</span></span>
             <input
               bind:value={mountPath}
-              placeholder="如: outbounds"
+              list="common-mount-paths"
+              placeholder=""
               class="w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
+            <datalist id="common-mount-paths">
+              <option value="inbounds"></option>
+              <option value="outbounds"></option>
+              <option value="endpoints"></option>
+              <option value="route.rules"></option>
+              <option value="dns.servers"></option>
+              <option value="dns.rules"></option>
+              <option value="log"></option>
+              <option value="experimental"></option>
+            </datalist>
           </label>
 
           <label class="block">

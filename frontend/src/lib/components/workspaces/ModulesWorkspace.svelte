@@ -117,6 +117,68 @@
     }
   }
 
+  const HASH_PALETTES = [
+    { bg: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/25 dark:text-emerald-300 dark:border-emerald-500/30', dot: 'bg-emerald-500' },
+    { bg: 'bg-blue-500/10 text-blue-700 border-blue-500/25 dark:text-blue-300 dark:border-blue-500/30', dot: 'bg-blue-500' },
+    { bg: 'bg-purple-500/10 text-purple-700 border-purple-500/25 dark:text-purple-300 dark:border-purple-500/30', dot: 'bg-purple-500' },
+    { bg: 'bg-amber-500/10 text-amber-700 border-amber-500/25 dark:text-amber-300 dark:border-amber-500/30', dot: 'bg-amber-500' },
+    { bg: 'bg-cyan-500/10 text-cyan-700 border-cyan-500/25 dark:text-cyan-300 dark:border-cyan-500/30', dot: 'bg-cyan-500' },
+    { bg: 'bg-rose-500/10 text-rose-700 border-rose-500/25 dark:text-rose-300 dark:border-rose-500/30', dot: 'bg-rose-500' },
+    { bg: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/25 dark:text-indigo-300 dark:border-indigo-500/30', dot: 'bg-indigo-500' }
+  ];
+
+  function getMountMeta(path: string | undefined): { label: string; pillClass: string; dotClass: string } {
+    if (!path) return { label: 'PATH', pillClass: 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700', dotClass: 'bg-zinc-400' };
+
+    const lower = path.toLowerCase();
+    if (lower.startsWith('inbound')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[0].bg, dotClass: HASH_PALETTES[0].dot };
+    if (lower.startsWith('outbound')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[1].bg, dotClass: HASH_PALETTES[1].dot };
+    if (lower.startsWith('endpoint')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[2].bg, dotClass: HASH_PALETTES[2].dot };
+    if (lower.startsWith('route')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[3].bg, dotClass: HASH_PALETTES[3].dot };
+    if (lower.startsWith('dns')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[4].bg, dotClass: HASH_PALETTES[4].dot };
+
+    let hash = 0;
+    for (let i = 0; i < path.length; i++) {
+      hash = (hash << 5) - hash + path.charCodeAt(i);
+      hash |= 0;
+    }
+    const idx = Math.abs(hash) % HASH_PALETTES.length;
+    return {
+      label: path.toUpperCase(),
+      pillClass: HASH_PALETTES[idx].bg,
+      dotClass: HASH_PALETTES[idx].dot
+    };
+  }
+
+  function groupModulesByMount(modules: Module[]) {
+    const record: Record<string, Module[]> = {};
+    for (const m of modules) {
+      const p = m.template?.mount_path || 'other';
+      if (!record[p]) record[p] = [];
+      record[p].push(m);
+    }
+
+    const sortOrder = ['inbounds', 'outbounds', 'endpoints', 'route.rules', 'dns.servers'];
+    const keys = Object.keys(record).sort((a, b) => {
+      const ia = sortOrder.indexOf(a);
+      const ib = sortOrder.indexOf(b);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return a.localeCompare(b);
+    });
+
+    return keys.map((k) => ({
+      mount: k,
+      meta: getMountMeta(k),
+      items: record[k]
+    }));
+  }
+
+  let selectedModuleMeta = $derived.by(() => {
+    return getMountMeta(targetTmpl?.mount_path);
+  });
+
   $effect(() => {
     const curMod = selectedModule;
     if (curMod && curMod.id !== lastLoadedModId) {
@@ -204,8 +266,9 @@
 
     <div class="flex-1 overflow-y-auto p-3 space-y-4">
       {#each CATEGORIES as cat (cat.key)}
-        {@const catModules = ws.modules.filter((m: Module) => m.category === cat.key && (selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (m.tags || []).includes(t))))}
+        {@const filteredModules = ws.modules.filter((m: Module) => m.category === cat.key && (selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (m.tags || []).includes(t))))}
         {@const isCollapsed = collapsedCategories[cat.key] === true}
+        {@const subGroups = groupModulesByMount(filteredModules)}
         
         <div class="rounded-xl border border-zinc-200/70 bg-zinc-100/60 p-1.5 dark:border-zinc-800/80 dark:bg-zinc-900/50">
           <button
@@ -218,66 +281,87 @@
               <Icon name={cat.icon} size={14} color={cat.color} />
               <span class="text-xs font-bold text-zinc-800 dark:text-zinc-200">{cat.title}</span>
             </div>
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold {catModules.length > 0 ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300' : 'bg-transparent text-zinc-400'}">
-              {catModules.length}
+            
+            <!-- 一级总数微拟态徽标：>0 清晰显眼，=0 优雅淡化 -->
+            <span class="inline-flex min-w-5 h-5 items-center justify-center text-[11px] font-mono font-bold px-1.5 rounded-full border shadow-2xs transition-all {filteredModules.length > 0 ? 'bg-zinc-200/90 border-zinc-300/80 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200' : 'bg-transparent border-transparent text-zinc-400 opacity-40'}">
+              {filteredModules.length}
             </span>
           </button>
 
           {#if !isCollapsed}
-            <div class="mt-1 flex flex-col gap-1.5 px-1.5 pb-1.5 animate-in fade-in duration-150">
-              {#each catModules as mod (mod.id)}
-                {@const isSelected = selectedModule?.id === mod.id}
-                <div class="group relative flex items-center justify-between rounded-xl px-3 py-2.5 text-xs transition border shadow-2xs {isSelected && !isModuleManageMode ? 'border-blue-500/50 bg-white text-zinc-900 font-extrabold dark:border-blue-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/50 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
-                  {#if isSelected && !isModuleManageMode}
-                    <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-blue-500"></span>
-                  {/if}
-
-                  <div class="flex items-center gap-2.5 truncate flex-1 pl-1.5">
-                    {#if isModuleManageMode}
-                      <input
-                        type="checkbox"
-                        checked={selectedModuleIds.includes(mod.id)}
-                        onchange={(e) => {
-                          if ((e.target as HTMLInputElement).checked) selectedModuleIds = [...selectedModuleIds, mod.id];
-                          else selectedModuleIds = selectedModuleIds.filter((id: string) => id !== mod.id);
-                        }}
-                        class="rounded h-3.5 w-3.5 cursor-pointer"
-                      />
-                    {/if}
-                    <button onclick={() => { activeModuleId = mod.id; }} type="button" class="truncate text-left flex-1 cursor-pointer font-medium">
-                      {mod.name}
-                    </button>
-                    
-                  </div>
-
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    {#if !isModuleManageMode}
-                      <div class="inline-flex items-center rounded-lg border border-zinc-200/80 bg-zinc-100/70 p-0.5 dark:border-zinc-700/80 dark:bg-zinc-800/60 shadow-2xs">
-                        {#if mod.template?.sing_box_version && mod.template.sing_box_version !== 'universal'}
-                          <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[10px] font-bold">
-                            v{mod.template.sing_box_version}
-                          </span>
-                        {/if}
-                        <span class="px-1.5 py-0.5 font-mono text-[10px] font-semibold text-zinc-600 dark:text-zinc-400">
-                          {mod.template?.mount_path || 'path'}
-                        </span>
-                      </div>
-                    {:else}
-                      <button title="克隆积木" onclick={() => onCloneModule(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                        <Icon name="copy" size={14} />
-                      </button>
-                      <button title="编辑元属性 (ID/名称/分类)" onclick={() => onEditModuleMeta(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                        <Icon name="pencil" size={14} />
-                      </button>
-                      <button title="删除积木" onclick={() => triggerConfirm('删除成品积木？', '将永久删除 [' + mod.name + ']。引用此积木的方案将自动解绑。', () => ws.batchDeleteModules([mod.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                        <Icon name="trash" size={14} />
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-              {:else}
+            <div class="mt-1 flex flex-col gap-2.5 px-1 pb-1 animate-in fade-in duration-150">
+              {#if filteredModules.length === 0}
                 <span class="text-xs text-zinc-400 italic px-2 py-2 block text-center">暂无积木</span>
-              {/each}
+              {:else}
+                {#each subGroups as group (group.mount)}
+                  <div class="space-y-1">
+                    <!-- 二级标头：微拟态彩色胶囊 + 统一柔和计数微标 -->
+                    <div class="flex items-center justify-between px-1.5 py-1">
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold tracking-wide {group.meta.pillClass}">
+                        <span class="w-1.5 h-1.5 rounded-full {group.meta.dotClass}"></span>
+                        <span>{group.meta.label}</span>
+                      </span>
+
+                      <!-- 二级小分组数量微标：清晰可读，不再是隐形灰字 -->
+                      <span class="inline-flex min-w-4.5 h-4.5 items-center justify-center text-[10px] font-mono font-bold px-1 rounded-md bg-zinc-200/70 border border-zinc-300/60 text-zinc-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300 shadow-2xs">
+                        {group.items.length}
+                      </span>
+                    </div>
+
+                    {#each group.items as mod (mod.id)}
+                      {@const isSelected = selectedModule?.id === mod.id}
+                      {@const itemMeta = getMountMeta(mod.template?.mount_path)}
+                      <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isModuleManageMode ? 'border-blue-500/60 bg-white text-zinc-900 font-extrabold dark:border-blue-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
+                        {#if isSelected && !isModuleManageMode}
+                          <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-blue-500"></span>
+                        {/if}
+
+                        <div class="flex items-center gap-2 truncate flex-1 pl-1">
+                          {#if isModuleManageMode}
+                            <input
+                              type="checkbox"
+                              checked={selectedModuleIds.includes(mod.id)}
+                              onchange={(e) => {
+                                if ((e.target as HTMLInputElement).checked) selectedModuleIds = [...selectedModuleIds, mod.id];
+                                else selectedModuleIds = selectedModuleIds.filter((id: string) => id !== mod.id);
+                              }}
+                              class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
+                            />
+                          {/if}
+                          <button onclick={() => { activeModuleId = mod.id; }} type="button" class="truncate text-left flex-1 cursor-pointer font-medium">
+                            {mod.name}
+                          </button>
+                        </div>
+
+                        <!-- 积木右侧直接继承母版的挂载点小胶囊 -->
+                        <div class="flex items-center gap-1.5 shrink-0">
+                          {#if !isModuleManageMode}
+                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold {itemMeta.pillClass}">
+                              <span class="w-1 h-1 rounded-full {itemMeta.dotClass}"></span>
+                              <span>{mod.template?.mount_path || 'path'}</span>
+                            </span>
+                            {#if mod.template?.sing_box_version && mod.template.sing_box_version !== 'universal'}
+                              <span class="px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 font-mono text-[9px] font-bold">
+                                v{mod.template.sing_box_version}
+                              </span>
+                            {/if}
+                          {:else}
+                            <button title="克隆积木" onclick={() => onCloneModule(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                              <Icon name="copy" size={13} />
+                            </button>
+                            <button title="编辑元属性" onclick={() => onEditModuleMeta(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                              <Icon name="pencil" size={13} />
+                            </button>
+                            <button title="删除积木" onclick={() => triggerConfirm('删除成品积木？', '将永久删除 [' + mod.name + ']。引用此积木的方案将自动解绑。', () => ws.batchDeleteModules([mod.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                              <Icon name="trash" size={13} />
+                            </button>
+                          {/if}
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                {/each}
+              {/if}
             </div>
           {/if}
         </div>
@@ -285,42 +369,48 @@
     </div>
   </aside>
 
-  <!-- 右侧主从工作台 -->
+  <!-- 右侧主工作台 -->
   {#if selectedModule}
     <main class="flex flex-1 min-w-0 overflow-hidden bg-white dark:bg-zinc-950">
-      <div class="flex flex-1 flex-col border-r border-zinc-200 dark:border-zinc-800">
+      <div class="flex flex-1 min-w-0 flex-col border-r border-zinc-200 dark:border-zinc-800">
         <!-- 头部导航 -->
-        <div class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-6 dark:border-zinc-800">
-          <div class="flex items-center gap-3">
-            <span class="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">{selectedModule.name}</span>
-            <span class="rounded-md border border-zinc-200 bg-zinc-100 px-2 py-0.5 font-mono text-xs font-bold text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 shadow-2xs">
+        <div class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-6 dark:border-zinc-800 gap-4">
+          <div class="flex items-center gap-3 min-w-0 flex-1">
+            <span class="text-sm font-extrabold text-zinc-900 dark:text-zinc-100 truncate max-w-50" title={selectedModule.name}>
+              {selectedModule.name}
+            </span>
+            <span class="rounded-md border border-zinc-200 bg-zinc-100 px-2 py-0.5 font-mono text-xs font-bold text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 shadow-2xs shrink-0">
               ID: {selectedModule.id}
             </span>
-            <span class="text-zinc-300 dark:text-zinc-700 text-lg mx-1">|</span>
-            <span class="text-xs text-zinc-500 font-medium">母版:</span>
-            <button
-              onclick={() => {
-                ws.switchWorkspace('foundry');
-              }}
-              type="button"
-              class="text-xs text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer transition flex items-center gap-1.5"
-            >
-              <span>{targetTmpl?.name || selectedModule.template_id} ↗</span>
-              <!-- 修复点：安全使用 targetTmpl 的版本，不使用 mod 变量 -->
+            <span class="text-zinc-300 dark:text-zinc-700 text-lg mx-0.5 shrink-0">|</span>
+            
+            <div class="flex items-center gap-1.5 min-w-0 truncate">
+              <span class="text-xs text-zinc-400 font-medium shrink-0">母版:</span>
+              <button
+                onclick={() => ws.switchWorkspace('foundry')}
+                type="button"
+                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border text-xs font-mono font-bold tracking-wide transition cursor-pointer hover:opacity-85 shadow-2xs truncate {selectedModuleMeta.pillClass}"
+                title={targetTmpl?.name || selectedModule.template_id}
+              >
+                <span class="w-1.5 h-1.5 rounded-full {selectedModuleMeta.dotClass} shrink-0"></span>
+                <span class="truncate">{targetTmpl?.name || selectedModule.template_id}</span>
+                <span class="shrink-0 text-[10px]">↗</span>
+              </button>
+
               {#if targetTmpl?.sing_box_version && targetTmpl.sing_box_version !== 'universal'}
-                <span class="px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/50 text-[9px] font-mono font-bold">
+                <span class="px-1.5 py-0.5 rounded-md bg-zinc-100 text-zinc-600 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700 text-[9px] font-mono font-bold shrink-0">
                   v{targetTmpl.sing_box_version}
                 </span>
               {/if}
-            </button>
+            </div>
           </div>
 
-          <div class="flex items-center gap-2.5">
+          <div class="flex items-center gap-2 shrink-0">
             {#if isDirty}
               <button
                 onclick={handleCancelChanges}
                 type="button"
-                class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer transition shadow-2xs"
+                class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer transition shadow-2xs whitespace-nowrap"
               >
                 放弃修改
               </button>
@@ -329,7 +419,7 @@
             <button
               onclick={handleSave}
               type="button"
-              class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5"
+              class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap"
             >
               <Icon name="check" size={14} />
               <span>{isDirty ? '保存实参 *' : '保存积木'}</span>
@@ -338,16 +428,17 @@
         </div>
 
         <div class="flex-1 overflow-y-auto p-6 space-y-6">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60 space-y-2">
+          <!-- 拓扑引用卡片 -->
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 dark:border-zinc-800 dark:bg-zinc-900/60 space-y-2 min-w-0">
               <span class="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
                 <Icon name="layers" color="amber" size={14} />
                 <span>装配此积木的方案 ({impactedProfiles.length})</span>
               </span>
               {#if impactedProfiles.length === 0}
-                <span class="text-xs text-zinc-400 italic block py-1">暂无方案装配此积木</span>
+                <span class="text-xs text-zinc-400 italic block py-0.5">暂无方案装配此积木</span>
               {:else}
-                <div class="flex flex-wrap gap-2 pt-1">
+                <div class="flex flex-wrap gap-1.5 pt-0.5">
                   {#each impactedProfiles as prof (prof.id)}
                     <button
                       onclick={() => {
@@ -355,7 +446,7 @@
                         ws.selectProfile(prof.id);
                       }}
                       type="button"
-                      class="rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300 transition cursor-pointer shadow-2xs"
+                      class="rounded-lg border border-amber-200/80 bg-amber-50/60 px-2.5 py-0.5 text-[11px] font-bold text-amber-700 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300 transition cursor-pointer shadow-2xs truncate max-w-45"
                     >
                       {prof.name} ↗
                     </button>
@@ -364,22 +455,20 @@
               {/if}
             </div>
 
-            <div class="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/60 space-y-2">
+            <div class="rounded-xl border border-zinc-200 bg-zinc-50/70 p-3.5 dark:border-zinc-800 dark:bg-zinc-900/60 space-y-2 min-w-0">
               <span class="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
                 <Icon name="server" color="blue" size={14} />
                 <span>此积木绑定的目标节点 ({usedNodes.length})</span>
               </span>
               {#if usedNodes.length === 0}
-                <span class="text-xs text-zinc-400 italic block py-1">使用静态值，未绑定任何节点</span>
+                <span class="text-xs text-zinc-400 italic block py-0.5">使用纯静态值，未绑定任何节点</span>
               {:else}
-                <div class="flex flex-wrap gap-2 pt-1">
+                <div class="flex flex-wrap gap-1.5 pt-0.5">
                   {#each usedNodes as dev (dev.id)}
                     <button
-                      onclick={() => {
-                        ws.switchWorkspace('fleet');
-                      }}
+                      onclick={() => ws.switchWorkspace('fleet')}
                       type="button"
-                      class="rounded-lg border border-blue-200/80 bg-blue-50/60 px-3 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300 transition cursor-pointer shadow-2xs"
+                      class="rounded-lg border border-blue-200/80 bg-blue-50/60 px-2.5 py-0.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300 transition cursor-pointer shadow-2xs truncate max-w-45"
                     >
                       {dev.name} ↗
                     </button>
@@ -390,11 +479,9 @@
           </div>
 
           <div class="space-y-4">
-            <div class="flex items-center justify-between">
-              <span class="text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                固化实参配置 (母版插孔定义):
-              </span>
-            </div>
+            <span class="text-sm font-bold text-zinc-800 dark:text-zinc-200 block">
+              固化实参配置:
+            </span>
 
             <ParamBinder
               {templateVars}
@@ -408,7 +495,7 @@
           </div>
         </div>
 
-        <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-4 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-4 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80 shrink-0">
           <div class="flex items-center gap-3">
             <span class="flex items-center gap-1.5">
               <span class="h-2 w-2 rounded-full {isDirty ? 'bg-amber-400 shadow-[0_0_6px_#fbbf24]' : 'bg-emerald-500'}"></span>
@@ -424,9 +511,9 @@
       </div>
 
       <!-- 右侧：真实单体 JSON 沙箱 -->
-      <div class="flex w-[45%] flex-col bg-zinc-50/50 dark:bg-zinc-950/80">
-        <div class="flex h-14 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
-          <span class="font-mono text-xs font-bold text-zinc-500 dark:text-zinc-400">MODULE PREVIEW (JSON CHUNK)</span>
+      <div class="flex w-[42%] min-w-88 flex-col bg-zinc-50/50 dark:bg-zinc-950/80 shrink-0">
+        <div class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
+          <span class="font-mono text-xs font-bold text-zinc-500 dark:text-zinc-400">MODULE PREVIEW</span>
           {#if previewError}
             <span class="text-[11px] text-rose-600 font-mono font-bold flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-900/50 shadow-2xs">
               <Icon name="close" size={13} />
@@ -459,7 +546,7 @@
             />
           </div>
         </div>
-        <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-4 flex items-center justify-between text-xs font-mono text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div class="h-8 shrink-0 border-t border-zinc-200 bg-zinc-50 px-4 flex items-center justify-between text-xs font-mono text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/80">
           <span>挂载目标: {targetTmpl?.mount_path || '未指定'}</span>
           <span>策略: {targetTmpl?.strategy || 'append'}</span>
         </div>

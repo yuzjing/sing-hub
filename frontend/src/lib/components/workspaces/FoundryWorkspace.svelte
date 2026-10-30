@@ -88,6 +88,64 @@
 
   let detectedVars = $derived.by(() => extractAllVars(studioTmplCode));
 
+  const HASH_PALETTES = [
+    { bg: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/25 dark:text-emerald-300 dark:border-emerald-500/30', dot: 'bg-emerald-500' },
+    { bg: 'bg-blue-500/10 text-blue-700 border-blue-500/25 dark:text-blue-300 dark:border-blue-500/30', dot: 'bg-blue-500' },
+    { bg: 'bg-purple-500/10 text-purple-700 border-purple-500/25 dark:text-purple-300 dark:border-purple-500/30', dot: 'bg-purple-500' },
+    { bg: 'bg-amber-500/10 text-amber-700 border-amber-500/25 dark:text-amber-300 dark:border-amber-500/30', dot: 'bg-amber-500' },
+    { bg: 'bg-cyan-500/10 text-cyan-700 border-cyan-500/25 dark:text-cyan-300 dark:border-cyan-500/30', dot: 'bg-cyan-500' },
+    { bg: 'bg-rose-500/10 text-rose-700 border-rose-500/25 dark:text-rose-300 dark:border-rose-500/30', dot: 'bg-rose-500' },
+    { bg: 'bg-indigo-500/10 text-indigo-700 border-indigo-500/25 dark:text-indigo-300 dark:border-indigo-500/30', dot: 'bg-indigo-500' }
+  ];
+
+  function getMountMeta(path: string | undefined): { label: string; pillClass: string; dotClass: string } {
+    if (!path) return { label: 'PATH', pillClass: 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700', dotClass: 'bg-zinc-400' };
+
+    const lower = path.toLowerCase();
+    if (lower.startsWith('inbound')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[0].bg, dotClass: HASH_PALETTES[0].dot };
+    if (lower.startsWith('outbound')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[1].bg, dotClass: HASH_PALETTES[1].dot };
+    if (lower.startsWith('endpoint')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[2].bg, dotClass: HASH_PALETTES[2].dot };
+    if (lower.startsWith('route')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[3].bg, dotClass: HASH_PALETTES[3].dot };
+    if (lower.startsWith('dns')) return { label: path.toUpperCase(), pillClass: HASH_PALETTES[4].bg, dotClass: HASH_PALETTES[4].dot };
+
+    let hash = 0;
+    for (let i = 0; i < path.length; i++) {
+      hash = (hash << 5) - hash + path.charCodeAt(i);
+      hash |= 0;
+    }
+    const idx = Math.abs(hash) % HASH_PALETTES.length;
+    return {
+      label: path.toUpperCase(),
+      pillClass: HASH_PALETTES[idx].bg,
+      dotClass: HASH_PALETTES[idx].dot
+    };
+  }
+
+  function groupComponentsByMount(components: Component[]) {
+    const record: Record<string, Component[]> = {};
+    for (const c of components) {
+      const p = c.mount_path || 'other';
+      if (!record[p]) record[p] = [];
+      record[p].push(c);
+    }
+
+    const sortOrder = ['inbounds', 'outbounds', 'endpoints', 'route.rules', 'dns.servers'];
+    const keys = Object.keys(record).sort((a, b) => {
+      const ia = sortOrder.indexOf(a);
+      const ib = sortOrder.indexOf(b);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return a.localeCompare(b);
+    });
+
+    return keys.map((k) => ({
+      mount: k,
+      meta: getMountMeta(k),
+      items: record[k]
+    }));
+  }
+
   $effect(() => {
     const curComp = selectedComp;
     if (curComp && curComp.id !== lastLoadedCompId) {
@@ -177,80 +235,96 @@
     <!-- 现代手风琴卡片分组 -->
     <div class="flex-1 overflow-y-auto p-3 space-y-4">
       {#each CATEGORIES as cat (cat.key)}
-        {@const catComponents = ws.components.filter((c: Component) => c.category === cat.key && (selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (c.scope_tag || '').includes(t))))}
+        {@const filteredComps = ws.components.filter((c: Component) => c.category === cat.key && (selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (c.scope_tag || '').includes(t))))}
         {@const isCollapsed = collapsedCategories[cat.key] === true}
+        {@const subGroups = groupComponentsByMount(filteredComps)}
         
-        <div class="rounded-2xl border border-zinc-200/70 bg-zinc-100/60 p-1.5 dark:border-zinc-800/80 dark:bg-zinc-900/50">
+        <div class="rounded-xl border border-zinc-200/70 bg-zinc-100/60 p-1.5 dark:border-zinc-800/80 dark:bg-zinc-900/50">
           <button
             onclick={() => toggleCategory(cat.key)}
             type="button"
-            class="w-full flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-zinc-200/50 dark:hover:bg-zinc-800/60 transition cursor-pointer select-none text-left"
+            class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg hover:bg-zinc-200/50 dark:hover:bg-zinc-800/60 transition cursor-pointer select-none text-left"
           >
             <div class="flex items-center gap-2">
               <span class="text-zinc-400 text-[10px] transform transition-transform duration-200 {isCollapsed ? '' : 'rotate-90'}">▶</span>
               <Icon name={cat.icon} size={14} color={cat.color} />
               <span class="text-xs font-bold text-zinc-800 dark:text-zinc-200">{cat.title}</span>
             </div>
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold {catComponents.length > 0 ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300' : 'bg-transparent text-zinc-400'}">
-              {catComponents.length}
+            
+            <!-- 一级总数微拟态徽标：>0 清晰显眼，=0 优雅淡化 -->
+            <span class="inline-flex min-w-5 h-5 items-center justify-center text-[11px] font-mono font-bold px-1.5 rounded-full border shadow-2xs transition-all {filteredComps.length > 0 ? 'bg-zinc-200/90 border-zinc-300/80 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200' : 'bg-transparent border-transparent text-zinc-400 opacity-40'}">
+              {filteredComps.length}
             </span>
           </button>
 
           {#if !isCollapsed}
-            <div class="mt-1 flex flex-col gap-1.5 px-1.5 pb-1.5 animate-in fade-in duration-150">
-              {#each catComponents as comp (comp.id)}
-                {@const isSelected = selectedComp?.id === comp.id}
-                <div class="group relative flex items-center justify-between rounded-xl px-3 py-2.5 text-xs transition border shadow-2xs {isSelected && !isCompManageMode ? 'border-emerald-500/50 bg-white text-zinc-900 font-extrabold dark:border-emerald-500/40 dark:bg-zinc-900 dark:text-white' : 'border-transparent text-zinc-600 hover:bg-white/60 dark:text-zinc-400 dark:hover:bg-zinc-850'}">
-                  {#if isSelected && !isCompManageMode}
-                    <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-emerald-500"></span>
-                  {/if}
-
-                  <div class="flex items-center gap-2.5 truncate flex-1 pl-1.5">
-                    {#if isCompManageMode}
-                      <input
-                        type="checkbox"
-                        checked={selectedCompIds.includes(comp.id)}
-                        onchange={(e) => {
-                          if ((e.target as HTMLInputElement).checked) selectedCompIds = [...selectedCompIds, comp.id];
-                          else selectedCompIds = selectedCompIds.filter((id: string) => id !== comp.id);
-                        }}
-                        class="rounded h-3.5 w-3.5 cursor-pointer"
-                      />
-                    {/if}
-                    <button onclick={() => { studioActiveCompId = comp.id; }} type="button" class="truncate text-left flex-1 cursor-pointer font-medium">
-                      {comp.name}
-                    </button>
-                  </div>
-
-                  <!-- 胶囊优化：一体化微拟态组合徽章 -->
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    {#if !isCompManageMode}
-                      <div class="inline-flex items-center rounded-lg border border-zinc-200/80 bg-zinc-100/70 p-0.5 dark:border-zinc-700/80 dark:bg-zinc-800/60 shadow-2xs">
-                        {#if comp.sing_box_version && comp.sing_box_version !== 'universal'}
-                          <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[10px] font-bold">
-                            v{comp.sing_box_version}
-                          </span>
-                        {/if}
-                        <span class="px-1.5 py-0.5 font-mono text-[10px] font-semibold text-zinc-600 dark:text-zinc-400">
-                          {comp.scope_tag}
-                        </span>
-                      </div>
-                    {:else}
-                      <button title="克隆母版" onclick={() => onCloneComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
-                        <Icon name="copy" size={14} />
-                      </button>
-                      <button title="编辑元属性" onclick={() => onEditComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
-                        <Icon name="pencil" size={14} />
-                      </button>
-                      <button title="删除母版" onclick={() => triggerConfirm('确认删除母版？', '将永久删除母版 [' + comp.name + ']。所有引用此母版的成品积木也会被删除。', () => ws.batchDeleteComponents([comp.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
-                        <Icon name="trash" size={14} />
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-              {:else}
+            <div class="mt-1 flex flex-col gap-2.5 px-1 pb-1 animate-in fade-in duration-150">
+              {#if filteredComps.length === 0}
                 <span class="text-xs text-zinc-400 italic px-2 py-2 block text-center">暂无母版</span>
-              {/each}
+              {:else}
+                {#each subGroups as group (group.mount)}
+                  <div class="space-y-1">
+                    <!-- 二级标头：微拟态彩色胶囊 + 统一柔和计数微标 -->
+                    <div class="flex items-center justify-between px-1.5 py-1">
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold tracking-wide {group.meta.pillClass}">
+                        <span class="w-1.5 h-1.5 rounded-full {group.meta.dotClass}"></span>
+                        <span>{group.meta.label}</span>
+                      </span>
+
+                      <!-- 二级小分组数量微标：清晰可读，不再是隐形灰字 -->
+                      <span class="inline-flex min-w-4.5 h-4.5 items-center justify-center text-[10px] font-mono font-bold px-1 rounded-md bg-zinc-200/70 border border-zinc-300/60 text-zinc-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300 shadow-2xs">
+                        {group.items.length}
+                      </span>
+                    </div>
+
+                    {#each group.items as comp (comp.id)}
+                      {@const isSelected = selectedComp?.id === comp.id}
+                      <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isCompManageMode ? 'border-emerald-500/60 bg-white text-zinc-900 font-extrabold dark:border-emerald-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
+                        {#if isSelected && !isCompManageMode}
+                          <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-emerald-500"></span>
+                        {/if}
+
+                        <div class="flex items-center gap-2 truncate flex-1 pl-1">
+                          {#if isCompManageMode}
+                            <input
+                              type="checkbox"
+                              checked={selectedCompIds.includes(comp.id)}
+                              onchange={(e) => {
+                                if ((e.target as HTMLInputElement).checked) selectedCompIds = [...selectedCompIds, comp.id];
+                                else selectedCompIds = selectedCompIds.filter((id: string) => id !== comp.id);
+                              }}
+                              class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
+                            />
+                          {/if}
+                          <button onclick={() => { studioActiveCompId = comp.id; }} type="button" class="truncate text-left flex-1 cursor-pointer font-medium">
+                            {comp.name}
+                          </button>
+                        </div>
+
+                        <div class="flex items-center gap-1.5 shrink-0">
+                          {#if !isCompManageMode}
+                            {#if comp.sing_box_version && comp.sing_box_version !== 'universal'}
+                              <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[9px] font-bold">
+                                v{comp.sing_box_version}
+                              </span>
+                            {/if}
+                          {:else}
+                            <button title="克隆母版" onclick={() => onCloneComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
+                              <Icon name="copy" size={13} />
+                            </button>
+                            <button title="编辑元属性" onclick={() => onEditComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
+                              <Icon name="pencil" size={13} />
+                            </button>
+                            <button title="删除母版" onclick={() => triggerConfirm('确认删除母版？', '将永久删除母版 [' + comp.name + ']。所有引用此母版的成品积木也会被删除。', () => ws.batchDeleteComponents([comp.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
+                              <Icon name="trash" size={13} />
+                            </button>
+                          {/if}
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                {/each}
+              {/if}
             </div>
           {/if}
         </div>
@@ -261,26 +335,28 @@
   <!-- 右侧母版代码编辑 -->
   {#if selectedComp}
     <main class="flex flex-1 min-w-0 overflow-hidden bg-white dark:bg-zinc-950">
-      <div class="flex flex-1 flex-col border-r border-zinc-200 dark:border-zinc-800">
-        <div class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">{selectedComp.name}</span>
-            <span class="rounded-md border border-zinc-200 bg-zinc-100 px-2 py-0.5 font-mono text-xs font-bold text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 shadow-2xs">
+      <div class="flex flex-1 min-w-0 flex-col border-r border-zinc-200 dark:border-zinc-800">
+        <div class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800 gap-4">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            <span class="text-sm font-extrabold text-zinc-900 dark:text-zinc-100 truncate max-w-50" title={selectedComp.name}>
+              {selectedComp.name}
+            </span>
+            <span class="rounded-md border border-zinc-200 bg-zinc-100 px-2 py-0.5 font-mono text-xs font-bold text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 shadow-2xs shrink-0">
               [{selectedComp.mount_path}]
             </span>
             {#if selectedComp.sing_box_version && selectedComp.sing_box_version !== 'universal'}
-              <span class="rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/40 px-2 py-0.5 font-mono text-xs font-bold">
+              <span class="rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/40 px-2 py-0.5 font-mono text-xs font-bold shrink-0">
                 内核: v{selectedComp.sing_box_version}
               </span>
             {/if}
           </div>
 
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 shrink-0">
             {#if isDirty}
               <button
                 onclick={handleCancelChanges}
                 type="button"
-                class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer transition shadow-2xs"
+                class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer transition shadow-2xs whitespace-nowrap"
               >
                 放弃修改
               </button>
@@ -289,7 +365,7 @@
             <button
               onclick={saveComp}
               type="button"
-              class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5"
+              class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap"
             >
               <Icon name="check" size={14} />
               <span>{isDirty ? '保存母版 *' : '保存母版'}</span>
@@ -312,7 +388,7 @@
           </div>
         </div>
 
-        <div class="border-t border-zinc-200 bg-zinc-50/70 p-5 dark:border-zinc-800 dark:bg-zinc-950/70 space-y-3">
+        <div class="border-t border-zinc-200 bg-zinc-50/70 p-5 dark:border-zinc-800 dark:bg-zinc-950/70 space-y-3 shrink-0">
           <div class="flex items-center justify-between">
             <span class="text-sm font-bold text-zinc-800 dark:text-zinc-200">自动侦测参数桩 (Mock Inputs):</span>
             <span class="text-xs text-zinc-500 font-mono">检测到 {detectedVars.length} 个模板插孔</span>
@@ -345,7 +421,7 @@
           {/if}
         </div>
 
-        <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-5 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-5 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80 shrink-0">
           <div class="flex items-center gap-4">
             <span class="flex items-center gap-2">
               <span class="h-2 w-2 rounded-full {isDirty ? 'bg-amber-400 shadow-[0_0_6px_#fbbf24]' : 'bg-emerald-500'}"></span>
@@ -361,8 +437,8 @@
       </div>
 
       <!-- 右侧渲染沙箱 -->
-      <div class="flex w-[45%] flex-col bg-zinc-50/50 dark:bg-zinc-950/80">
-        <div class="flex h-14 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
+      <div class="flex w-[42%] min-w-88 flex-col bg-zinc-50/50 dark:bg-zinc-950/80 shrink-0">
+        <div class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
           <span class="font-mono text-sm font-bold text-zinc-500 dark:text-zinc-400">RENDERED JSON SANDBOX</span>
           {#if studioPreviewError}
             <span class="text-[11px] text-rose-600 font-mono font-bold flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-900/50 shadow-2xs">
@@ -393,7 +469,7 @@
           </div>
         </div>
 
-        <div class="h-8 border-t border-zinc-200 bg-zinc-50 px-5 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div class="h-8 shrink-0 border-t border-zinc-200 bg-zinc-50 px-5 flex items-center justify-between text-xs font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80">
           <span>挂载目标: {selectedComp.mount_path}</span>
           <span>大小: {(new Blob([studioPreviewJSON]).size / 1024).toFixed(1)} KB</span>
         </div>
