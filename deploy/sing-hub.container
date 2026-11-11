@@ -12,11 +12,14 @@ AutoUpdate=registry
 
 Network=infra.network
 
-Environment=DATA_DIR=/data
 
 Volume=/mnt/fast-data/databases/sing-hub:/data:U
 
 Environment=TZ=Asia/Shanghai
+Environment=DATA_DIR=/data
+Environment=LISTEN=:8080
+# 追求节能安静可用WARN
+Environment=LOG_LEVEL=info
 
 [Service]
 MemoryMax=256M

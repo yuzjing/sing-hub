@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,21 +20,18 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "./config.toml", "Path to config.toml")
-	flag.Parse()
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		slog.Error("fatal: failed to load config.toml", "path", *configPath, "err", err)
-		os.Exit(1)
-	}
+	// 纯内存加载环境变量与 Flag，彻底告别文件 I/O 报错
+	cfg := config.Load()
 
 	logLevel := new(slog.LevelVar)
-	if strings.ToLower(cfg.Server.LogLevel) == "debug" {
+	switch strings.ToLower(cfg.LogLevel) {
+	case "debug":
 		logLevel.Set(slog.LevelDebug)
-	} else if strings.ToLower(cfg.Server.LogLevel) == "warn" {
+	case "warn":
 		logLevel.Set(slog.LevelWarn)
-	} else {
+	case "error":
+		logLevel.Set(slog.LevelError)
+	default:
 		logLevel.Set(slog.LevelInfo)
 	}
 
@@ -43,13 +39,13 @@ func main() {
 	slog.SetDefault(slog.New(handler))
 
 	slog.Info("starting sing-hub engine",
-		"listen", cfg.Server.Listen,
-		"data_dir", cfg.Server.DataDir,
-		"initial_log_level", cfg.Server.LogLevel,
+		"listen", cfg.Listen,
+		"data_dir", cfg.DataDir,
+		"log_level", cfg.LogLevel,
 	)
 
-	_ = os.MkdirAll(cfg.Server.DataDir, 0755)
-	dbPath := filepath.Join(cfg.Server.DataDir, "sing-hub.db")
+	_ = os.MkdirAll(cfg.DataDir, 0755)
+	dbPath := filepath.Join(cfg.DataDir, "sing-hub.db")
 
 	s, err := store.New(dbPath)
 	if err != nil {
@@ -58,20 +54,19 @@ func main() {
 	}
 	defer s.Close()
 
-	gitRepo, err := versioning.NewGitRepo(cfg.Server.DataDir)
+	gitRepo, err := versioning.NewGitRepo(cfg.DataDir)
 	if err != nil {
 		slog.Warn("gitops engine init warning (version audit disabled)", "err", err)
 	}
 
-	binDir := filepath.Join(cfg.Server.DataDir, "bin")
+	binDir := filepath.Join(cfg.DataDir, "bin")
 	eng := assembler.New(s, gitRepo, binDir)
 	upd := updater.New(s, binDir)
-	// 👑 彻底剔除 upd.StartPeriodicTask()，全系统纯按需驱动，零后台协程空转！
 
 	srv := server.New(s, eng, gitRepo, upd, dbPath, logLevel)
 
 	httpServer := &http.Server{
-		Addr:    cfg.Server.Listen,
+		Addr:    cfg.Listen,
 		Handler: srv,
 	}
 
@@ -79,7 +74,7 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		slog.Info("sing-hub dual-stack service is running", "endpoint", cfg.Server.Listen)
+		slog.Info("sing-hub dual-stack service is running", "endpoint", cfg.Listen)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("http server failed", "err", err)
 			os.Exit(1)
@@ -89,7 +84,6 @@ func main() {
 	<-stop
 	slog.Info("shutting down sing-hub gracefully...")
 
-	// 优雅关机超时控制：给正在处理的请求 5 秒退出时间，确保 SQLite 事务提交
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {

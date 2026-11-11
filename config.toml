@@ -1,6 +1,0 @@
-[server]
-listen = ':8080'
-# 👑 关键：指向绝对路径 /data，确保所有 db、git、bin 全部落在宿主机 NVMe 挂载卷内
-data_dir = '/data'
-# 追求极致静默节能可设为 warn；日常调试用 info
-log_level = 'info'
