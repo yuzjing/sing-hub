@@ -1,24 +1,27 @@
 [Unit]
-Description=Sing-Box Configuration Hub (Rootless Quadlet)
-After=network-online.target
+Description=Sing-Hub Management Core (Rootless)
+After=network-online.target sing-box.service
+Wants=network-online.target
+StartLimitIntervalSec=5m
+StartLimitBurst=5
 
 [Container]
-Image=localhost/sing-hub:latest
+Image=ghcr.io/yuzjing/sing-hub:latest
 ContainerName=sing-hub
+AutoUpdate=registry
 
+Network=infra.network
 
-Volume=%h/data/sing-hub:/data:Z
+Environment=DATA_DIR=/data
 
+Volume=/mnt/fast-data/databases/sing-hub:/data:U
 
 Environment=TZ=Asia/Shanghai
 
-
-PublishPort=8080:8080
-
-
-Exec=sing-hub -config /data/config.toml
-
-Restart=always
+[Service]
+MemoryMax=256M
+CPUWeight=100
+Restart=on-failure
 
 [Install]
 WantedBy=default.target
