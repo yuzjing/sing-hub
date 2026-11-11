@@ -165,7 +165,7 @@ func (u *Updater) TriggerUpdate(ctx context.Context) {
 }
 
 func (u *Updater) getHTTPClient(ctx context.Context) (*http.Client, error) {
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{Timeout: 600 * time.Second}
 	proxyStr := u.store.GetSetting(ctx, "github_proxy", "")
 
 	if proxyStr != "" {
@@ -264,28 +264,14 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 			return fmt.Errorf("解析 Stable JSON 失败: %w", err)
 		}
 		targetTag = rel.TagName
-		// 👑 智能判定当前运行时环境是 musl (如 Alpine) 还是 glibc
-		isMusl := isMuslEnvironment()
 		for _, a := range rel.Assets {
 			name := a.Name
-			// 必须匹配对应 CPU 架构且是 tar.gz
-			if !strings.Contains(name, "linux-"+runtime.GOARCH) || !strings.HasSuffix(name, ".tar.gz") {
-				continue
-			}
-
-			// 👑 关键防御：如果在 Alpine(musl) 下，坚决不能下 -glibc 包！
-			if isMusl {
-				// 优先找明确带 -musl 的包，或者纯净版 (不带 -glibc 也不带 -musl)
-				if strings.Contains(name, "-musl") || (!strings.Contains(name, "-glibc") && !strings.Contains(name, "v3")) {
-					downloadURL = a.BrowserDownloadURL
-					break
-				}
-			} else {
-				// 如果是 glibc 环境，优先匹配带 -glibc 或通用包，排除 -musl
-				if !strings.Contains(name, "-musl") {
-					downloadURL = a.BrowserDownloadURL
-					break
-				}
+			// 关键条件：严格以 "-linux-amd64.tar.gz" 结尾！
+			// 这样会自动排除 "-glibc.tar.gz"、"-musl.tar.gz" 以及 "-amd64v3.tar.gz"
+			expectedSuffix := fmt.Sprintf("-linux-%s.tar.gz", runtime.GOARCH)
+			if strings.HasSuffix(name, expectedSuffix) {
+				downloadURL = a.BrowserDownloadURL
+				break
 			}
 		}
 	} else {
@@ -338,7 +324,7 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 	if mirror != "" {
 		mirroredURL := mirror + "/" + downloadURL
 		slog.Info("trying mirror download", "channel", channel, "url", mirroredURL)
-		directClient := &http.Client{Timeout: 90 * time.Second}
+		directClient := &http.Client{Timeout: 600 * time.Second}
 		dlReq, _ := http.NewRequestWithContext(ctx, "GET", mirroredURL, nil)
 		res, dErr := directClient.Do(dlReq)
 		if dErr == nil && res.StatusCode == 200 {
@@ -427,15 +413,4 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 		return errors.New("压缩包内未找到名为 'sing-box' 的可执行文件")
 	}
 	return nil
-}
-
-// 探测当前运行环境是否为 musl libc (如 Alpine 容器)
-func isMuslEnvironment() bool {
-	// 方式 1: 检查 Alpine 的标志性 release 文件
-	if _, err := os.Stat("/etc/alpine-release"); err == nil {
-		return true
-	}
-	// 方式 2: 检查动态链接器是否存在 musl 标识
-	matches, _ := filepath.Glob("/lib/ld-musl-*.so.*")
-	return len(matches) > 0
 }

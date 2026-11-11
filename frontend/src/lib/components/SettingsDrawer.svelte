@@ -26,7 +26,6 @@
     if (open) {
       linterEnabled = ws.systemSettings.singbox_linter_enabled !== 'false';
       if (!ws.systemSettings.singbox_update_channel) ws.systemSettings.singbox_update_channel = 'all';
-      if (!ws.systemSettings.singbox_update_interval) ws.systemSettings.singbox_update_interval = '24';
       ws.fetchUpdaterStatus();
     } else {
       stopPolling();
@@ -121,7 +120,7 @@
 
           {#if linterEnabled}
             <div class="space-y-3 pt-2 border-t border-zinc-100 dark:border-zinc-800 animate-in fade-in duration-150">
-              <div class="grid grid-cols-2 gap-3">
+              <div class="space-y-3">
                 <label class="block">
                   <span class="block text-xs text-zinc-500 mb-1">更新与校验通道</span>
                   <select bind:value={ws.systemSettings.singbox_update_channel} class="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 cursor-pointer">
@@ -129,13 +128,6 @@
                     <option value="stable">仅正式版 (Stable)</option>
                     <option value="alpha">仅尝鲜版 (Alpha)</option>
                     <option value="disabled">关闭更新</option>
-                  </select>
-                </label>
-                <label class="block">
-                  <span class="block text-xs text-zinc-500 mb-1">自动检查频率</span>
-                  <select bind:value={ws.systemSettings.singbox_update_interval} class="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 cursor-pointer">
-                    <option value="24">每天一次</option>
-                    <option value="0">仅手动触发</option>
                   </select>
                 </label>
               </div>

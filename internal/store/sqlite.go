@@ -723,6 +723,27 @@ func (s *Store) GetSetting(ctx context.Context, key string, fallback string) str
 	return val
 }
 
+// GetAllSettings 全量读取所有持久化配置项
+func (s *Store) GetAllSettings(ctx context.Context) (map[string]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err == nil {
+			settings[k] = v
+		}
+	}
+	return settings, rows.Err()
+}
+
 func (s *Store) SetSetting(ctx context.Context, key string, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -505,17 +505,26 @@ func (s *Server) handleSetLogLevel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings := map[string]string{
-		"git_remote_url":          s.store.GetSetting(r.Context(), "git_remote_url", ""),
-		"git_branch":              s.store.GetSetting(r.Context(), "git_branch", "main"),
-		"github_proxy":            s.store.GetSetting(r.Context(), "github_proxy", ""),
-		"git_token":               s.store.GetSetting(r.Context(), "git_token", ""),
-		"ssh_timeout":             s.store.GetSetting(r.Context(), "ssh_timeout", "10"),
-		"singbox_update_channel":  s.store.GetSetting(r.Context(), "singbox_update_channel", "all"),
-		"singbox_update_interval": s.store.GetSetting(r.Context(), "singbox_update_interval", "24"),
-		"singbox_linter_enabled":  s.store.GetSetting(r.Context(), "singbox_linter_enabled", "true"),
+	// 1. 设置合理的开箱即用默认值
+	defaults := map[string]string{
+		"git_remote_url":         "",
+		"git_branch":             "main",
+		"github_proxy":           "",
+		"github_mirror":          "", // 👑 补齐镜像项
+		"git_token":              "",
+		"ssh_timeout":            "10",
+		"singbox_update_channel": "all",
+		"singbox_linter_enabled": "true",
 	}
-	writeJSON(w, http.StatusOK, settings)
+
+	// 2. 从 SQLite 动态加载所有真实配置，无缝覆盖默认值
+	if saved, err := s.store.GetAllSettings(r.Context()); err == nil {
+		for k, v := range saved {
+			defaults[k] = v
+		}
+	}
+
+	writeJSON(w, http.StatusOK, defaults)
 }
 
 func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
