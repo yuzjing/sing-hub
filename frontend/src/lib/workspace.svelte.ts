@@ -129,10 +129,7 @@ export class WorkspaceState {
     if (this.profiles.length > 0 && !this.activeProfileId) {
       this.selectProfile(this.profiles[0].id);
     }
-    // 后台持续轮询内核状态
-    setInterval(() => {
-      if (this.showSettingsDrawer) this.fetchUpdaterStatus();
-    }, 5000);
+    
 
   }
 

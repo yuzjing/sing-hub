@@ -1,7 +1,7 @@
-// cmd/sing-hub/main.go
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"net/http"
@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"sing-hub/internal/assembler"
 	"sing-hub/internal/config"
@@ -32,6 +33,8 @@ func main() {
 	logLevel := new(slog.LevelVar)
 	if strings.ToLower(cfg.Server.LogLevel) == "debug" {
 		logLevel.Set(slog.LevelDebug)
+	} else if strings.ToLower(cfg.Server.LogLevel) == "warn" {
+		logLevel.Set(slog.LevelWarn)
 	} else {
 		logLevel.Set(slog.LevelInfo)
 	}
@@ -60,13 +63,11 @@ func main() {
 		slog.Warn("gitops engine init warning (version audit disabled)", "err", err)
 	}
 
-	// 核心改造：将 config.toml 中的 DataDir/bin 权威注入给 updater，杜绝任何硬编码
 	binDir := filepath.Join(cfg.Server.DataDir, "bin")
 	eng := assembler.New(s, gitRepo, binDir)
 	upd := updater.New(s, binDir)
-	upd.StartPeriodicTask()
+	// 👑 彻底剔除 upd.StartPeriodicTask()，全系统纯按需驱动，零后台协程空转！
 
-	// 将 updater 作为第 4 个参数传入 Server
 	srv := server.New(s, eng, gitRepo, upd, dbPath, logLevel)
 
 	httpServer := &http.Server{
@@ -86,5 +87,13 @@ func main() {
 	}()
 
 	<-stop
+	slog.Info("shutting down sing-hub gracefully...")
+
+	// 优雅关机超时控制：给正在处理的请求 5 秒退出时间，确保 SQLite 事务提交
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http server forced to shutdown", "err", err)
+	}
 	slog.Info("sing-hub shutdown gracefully completed")
 }

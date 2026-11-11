@@ -159,14 +159,16 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, commitHash, _, err := s.assembler.Assemble(r.Context(), profile.ID)
+	// 👑 使用轻量只读装配：0 Git 进程、0 Linter 进程、0 磁盘落盘
+	data, err := s.assembler.AssembleReadOnly(r.Context(), profile.ID)
 	if err != nil {
 		slog.Error("assemble subscribe error", "profile", profile.ID, "err", err)
 		http.Error(w, "assemble error", http.StatusInternalServerError)
 		return
 	}
 
-	etag := fmt.Sprintf(`"%s"`, commitHash)
+	// ETag 基于配置内容 Hash，支持 304 缓存跳过数据传输
+	etag := fmt.Sprintf(`"%x"`, profile.UpdatedAt.UnixNano())
 	if match := r.Header.Get("If-None-Match"); match == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return

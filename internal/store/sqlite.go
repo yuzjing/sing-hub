@@ -21,7 +21,8 @@ type Store struct {
 }
 
 func New(dbPath string) (*Store, error) {
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)", dbPath)
+	// 👑 加入 _pragma=synchronous(NORMAL)，配合 WAL 模式在保证断电安全的同时彻底避免频繁 NVMe Flush
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite failed: %w", err)

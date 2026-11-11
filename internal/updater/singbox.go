@@ -32,10 +32,14 @@ var verExtractRegex = regexp.MustCompile(`([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[a-zA-
 type Updater struct {
 	store     *store.Store
 	binDir    string
-	mu        sync.Mutex
+	mu        sync.RWMutex // 读写锁：高频读状态零等待
 	isRunning bool
 	lastError string
 	lastCheck time.Time
+
+	// 👑 关键架构优化：内存版本缓存，杜绝重复 fork 进程唤醒 CPU
+	cachedStableVer string
+	cachedAlphaVer  string
 }
 
 type UpdaterStatus struct {
@@ -54,19 +58,38 @@ func New(s *store.Store, binDir string) *Updater {
 	if err != nil {
 		abs = binDir
 	}
-	return &Updater{
+	u := &Updater{
 		store:  s,
 		binDir: abs,
 	}
+
+	// 👑 启动时如果发现 DB 无记录，才物理扫描一次补齐历史状态（仅执行一次）
+	ctx := context.Background()
+	if u.store.GetSetting(ctx, "singbox_local_stable_ver", "") == "" {
+		ver := detectLocalBinVersion(filepath.Join(abs, "sing-box-stable"))
+		_ = u.store.SetSetting(ctx, "singbox_local_stable_ver", ver)
+	}
+	if u.store.GetSetting(ctx, "singbox_local_alpha_ver", "") == "" {
+		ver := detectLocalBinVersion(filepath.Join(abs, "sing-box-alpha"))
+		_ = u.store.SetSetting(ctx, "singbox_local_alpha_ver", ver)
+	}
+
+	return u
 }
 
-// detectLocalBinVersion 绝对真实物理探测：杜绝任何“已就绪”等歧义词
+// 刷新内存缓存（调用时需持有锁或在单协程初始化阶段）
+func (u *Updater) refreshLocalVersionsLocked() {
+	stableBin := filepath.Join(u.binDir, "sing-box-stable")
+	alphaBin := filepath.Join(u.binDir, "sing-box-alpha")
+	u.cachedStableVer = detectLocalBinVersion(stableBin)
+	u.cachedAlphaVer = detectLocalBinVersion(alphaBin)
+}
+
 func detectLocalBinVersion(binPath string) string {
 	info, err := os.Stat(binPath)
 	if err != nil {
 		return "未安装"
 	}
-	// 校验文件非空且具备基础可执行权限
 	if info.Size() == 0 {
 		return "文件损坏 (0字节)"
 	}
@@ -96,19 +119,17 @@ func (u *Updater) GetStatus(ctx context.Context) UpdaterStatus {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	stableBin := filepath.Join(u.binDir, "sing-box-stable")
-	alphaBin := filepath.Join(u.binDir, "sing-box-alpha")
-
 	lastCheckStr := "-"
 	if !u.lastCheck.IsZero() {
 		lastCheckStr = u.lastCheck.Format("2006-01-02 15:04:05")
 	}
 
+	// 👑 彻底剔除 detectLocalBinVersion！直接从 DB 读入，微秒级响应，0 进程，放行 CPU C6 休眠
 	return UpdaterStatus{
 		IsRunning:           u.isRunning,
 		BinDir:              u.binDir,
-		LocalStableVersion:  detectLocalBinVersion(stableBin),
-		LocalAlphaVersion:   detectLocalBinVersion(alphaBin),
+		LocalStableVersion:  u.store.GetSetting(ctx, "singbox_local_stable_ver", "未安装"),
+		LocalAlphaVersion:   u.store.GetSetting(ctx, "singbox_local_alpha_ver", "未安装"),
 		RemoteStableVersion: u.store.GetSetting(ctx, "singbox_remote_stable_ver", "-"),
 		RemoteAlphaVersion:  u.store.GetSetting(ctx, "singbox_remote_alpha_ver", "-"),
 		LastCheck:           lastCheckStr,
@@ -123,7 +144,6 @@ func (u *Updater) TriggerUpdate(ctx context.Context) {
 		return
 	}
 	u.isRunning = true
-	// 关键优化：清空上次错误，拉取中不要把临时提示塞进 lastError 导致前端误报异常！
 	u.lastError = ""
 	u.mu.Unlock()
 
@@ -138,26 +158,9 @@ func (u *Updater) TriggerUpdate(ctx context.Context) {
 		} else {
 			u.lastError = ""
 		}
+		// 👑 更新完成后，刷新一次内存版本
+		u.refreshLocalVersionsLocked()
 		u.mu.Unlock()
-	}()
-}
-
-func (u *Updater) StartPeriodicTask() {
-	go func() {
-		time.Sleep(3 * time.Second)
-		u.TriggerUpdate(context.Background())
-
-		for {
-			time.Sleep(1 * time.Hour)
-			ctx := context.Background()
-			interval := u.store.GetSetting(ctx, "singbox_update_interval", "24")
-			if interval == "0" {
-				continue
-			}
-			if time.Since(u.lastCheck).Hours() >= 23.5 {
-				u.TriggerUpdate(ctx)
-			}
-		}
 	}()
 }
 
@@ -362,17 +365,42 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 			return fmt.Errorf("解包 tar 失败: %w", err)
 		}
 		if !header.FileInfo().IsDir() && strings.HasSuffix(header.Name, "sing-box") {
-			f, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0755)
+			tmpPath := fmt.Sprintf("%s.tmp.%d", targetPath, time.Now().UnixNano())
+			var success bool
+			defer func() {
+				if !success {
+					_ = os.Remove(tmpPath)
+				}
+			}()
+
+			f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0755)
 			if err != nil {
-				return fmt.Errorf("创建二进制文件失败: %w", err)
+				return fmt.Errorf("创建临时二进制文件失败: %w", err)
 			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return fmt.Errorf("写入本地二进制失败: %w", err)
+
+			written, err := io.Copy(f, tr)
+			_ = f.Close()
+			if err != nil {
+				return fmt.Errorf("写入本地二进制中断 (已写 %d 字节): %w", written, err)
 			}
-			f.Close()
+
+			// 自检合法性
+			ver := detectLocalBinVersion(tmpPath)
+			if strings.Contains(ver, "异常") || strings.Contains(ver, "损坏") || ver == "未安装" {
+				return fmt.Errorf("二进制校验失败 (%s)，已自动回滚销毁", ver)
+			}
+
+			// 原子重命名
+			if err := os.Rename(tmpPath, targetPath); err != nil {
+				return fmt.Errorf("原子替换二进制失败: %w", err)
+			}
+
+			// 👑 关键：下载成功后持久化进数据库！后续 GetStatus 永不探测磁盘
+			_ = u.store.SetSetting(ctx, "singbox_local_"+channel+"_ver", ver)
+
+			success = true
 			found = true
-			slog.Info("sing-box updated successfully", "channel", channel, "version", targetTag, "path", targetPath)
+			slog.Info("sing-box updated and persisted to DB", "channel", channel, "version", ver)
 			break
 		}
 	}

@@ -32,19 +32,25 @@ type DeployResult struct {
 	Logs          string `json:"logs"`
 }
 
+// 👑 健壮支持：纯IP、带端口IP、[IPv6]:port、域名等各类复杂端点
 func PingTarget(endpoint string, port int, timeout time.Duration) (int64, error) {
 	if port <= 0 {
-		port = 80
+		port = 22
 	}
+	endpoint = strings.TrimSpace(endpoint)
 	host := endpoint
-	if strings.Contains(endpoint, ":") && !strings.HasPrefix(endpoint, "[") {
-		if h, p, err := net.SplitHostPort(endpoint); err == nil {
-			host = h
-			if parsedP, err := strconv.Atoi(p); err == nil {
-				port = parsedP
-			}
+
+	// 优先尝试标准拆分 host 和 port
+	if h, p, err := net.SplitHostPort(endpoint); err == nil {
+		host = h
+		if parsedP, err := strconv.Atoi(p); err == nil && parsedP > 0 {
+			port = parsedP
 		}
+	} else {
+		// 去除 IPv6 外层方括号残留
+		host = strings.Trim(endpoint, "[]")
 	}
+
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	start := time.Now()
 	conn, err := net.DialTimeout("tcp", addr, timeout)

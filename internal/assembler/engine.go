@@ -268,18 +268,44 @@ func (e *Engine) PreviewComponent(ctx context.Context, tmplStr string, paramsJSO
 	return string(pretty), nil
 }
 
+// 👑 新增：纯内存只读装配，专供客户端 /sub 订阅拉取，完全不触发 Git 提交与内核冷启动
+func (e *Engine) AssembleReadOnly(ctx context.Context, profileID string) ([]byte, error) {
+	return e.buildProfileJSON(ctx, profileID)
+}
+
+// 原始 Assemble 专供前端“编译方案 / 保存”时调用，此时才需要 Git 快照与双轨语法检查
 func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string, ValidationReport, error) {
 	start := time.Now()
-	slog.Info("assembling profile from modules", "profile_id", profileID)
+	slog.Info("assembling profile with validation", "profile_id", profileID)
 
+	finalJSON, err := e.buildProfileJSON(ctx, profileID)
+	if err != nil {
+		return nil, "", ValidationReport{}, err
+	}
+
+	var commitHash string
+	if e.gitRepo != nil {
+		sqlDump, _ := e.store.DumpSQL(ctx)
+		commitHash, _ = e.gitRepo.CommitSnapshot(profileID, finalJSON, sqlDump)
+	}
+
+	// 仅在前端显式编译时执行双轨校验
+	report := e.ValidateDualTrack(ctx, finalJSON)
+
+	slog.Info("profile assembly finished", "profile", profileID, "duration_ms", time.Since(start).Milliseconds())
+	return finalJSON, commitHash, report, nil
+}
+
+// 👑 将原本 Assemble 中拼装 JSON 的几十行逻辑抽为纯函数 buildProfileJSON
+func (e *Engine) buildProfileJSON(ctx context.Context, profileID string) ([]byte, error) {
 	profile, err := e.store.GetProfile(ctx, profileID)
 	if err != nil {
-		return nil, "", ValidationReport{}, fmt.Errorf("获取方案失败: %w", err)
+		return nil, fmt.Errorf("获取方案失败: %w", err)
 	}
 
 	resolvedModules, err := e.store.GetResolvedProfileModules(ctx, profileID)
 	if err != nil {
-		return nil, "", ValidationReport{}, fmt.Errorf("加载积木依赖失败: %w", err)
+		return nil, fmt.Errorf("加载积木依赖失败: %w", err)
 	}
 
 	var associatedDevice *model.Device
@@ -337,41 +363,25 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 
 		tmpl, err := template.New(item.Module.ID).Funcs(funcMap()).Parse(item.Template.PayloadTmpl)
 		if err != nil {
-			return nil, "", ValidationReport{}, fmt.Errorf("积木 [%s] 语法错误: %w", item.Module.Name, err)
+			return nil, fmt.Errorf("积木 [%s] 语法错误: %w", item.Module.Name, err)
 		}
 
 		var rendered bytes.Buffer
 		if err := tmpl.Execute(&rendered, params); err != nil {
-			return nil, "", ValidationReport{}, fmt.Errorf("积木 [%s] 渲染错误: %w", item.Module.Name, err)
+			return nil, fmt.Errorf("积木 [%s] 渲染错误: %w", item.Module.Name, err)
 		}
 
 		var chunk any
 		if err := json.Unmarshal(rendered.Bytes(), &chunk); err != nil {
-			return nil, "", ValidationReport{}, fmt.Errorf("积木 [%s] 产生非法 JSON: %w\n%s", item.Module.Name, err, rendered.String())
+			return nil, fmt.Errorf("积木 [%s] 产生非法 JSON: %w\n%s", item.Module.Name, err, rendered.String())
 		}
 
 		if err := mount(root, item.Template.MountPath, item.Template.Strategy, chunk); err != nil {
-			return nil, "", ValidationReport{}, fmt.Errorf("装配积木 [%s] 失败: %w", item.Module.Name, err)
+			return nil, fmt.Errorf("装配积木 [%s] 失败: %w", item.Module.Name, err)
 		}
 	}
 
-	finalJSON, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return nil, "", ValidationReport{}, err
-	}
-
-	var commitHash string
-	if e.gitRepo != nil {
-		sqlDump, _ := e.store.DumpSQL(ctx)
-		commitHash, _ = e.gitRepo.CommitSnapshot(profileID, finalJSON, sqlDump)
-	}
-
-	// 执行双轨校验，返回结构化报告
-	report := e.ValidateDualTrack(ctx, finalJSON)
-
-	slog.Info("profile assembly finished", "profile", profileID, "duration_ms", time.Since(start).Milliseconds())
-
-	return finalJSON, commitHash, report, nil
+	return json.MarshalIndent(root, "", "  ")
 }
 
 func mount(root map[string]any, mountPath string, strategy model.Strategy, chunk any) error {
