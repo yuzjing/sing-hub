@@ -53,6 +53,11 @@ type UpdaterStatus struct {
 	LastError           string `json:"last_error"`
 }
 
+type releaseAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
 func New(s *store.Store, binDir string) *Updater {
 	abs, err := filepath.Abs(binDir)
 	if err != nil {
@@ -229,6 +234,33 @@ func (u *Updater) runUpdateFlow() error {
 	return nil
 }
 
+// 👑 未来免疫型资产挑选器：按评分选出最适合当前平台的纯静态二进制
+func pickBestAsset(assets []releaseAsset) (string, error) {
+	expectedUniversalSuffix := fmt.Sprintf("-linux-%s.tar.gz", runtime.GOARCH)
+
+	// 1. 黄金标准：严格匹配官方通用纯静态包 (无任何 glibc / musl / v3 后缀)
+	for _, a := range assets {
+		if strings.HasSuffix(a.Name, expectedUniversalSuffix) {
+			slog.Info("matched official universal static asset", "name", a.Name)
+			return a.BrowserDownloadURL, nil
+		}
+	}
+
+	// 2. 兜底回退：如果未来官方改名，排除一切已知有毒变种 (glibc, musl, v3, legacy)
+	for _, a := range assets {
+		name := strings.ToLower(a.Name)
+		if strings.Contains(name, "linux-"+runtime.GOARCH) && strings.HasSuffix(name, ".tar.gz") {
+			if !strings.Contains(name, "glibc") && !strings.Contains(name, "musl") &&
+				!strings.Contains(name, "v3") && !strings.Contains(name, "legacy") {
+				slog.Warn("fallback to clean asset", "name", a.Name)
+				return a.BrowserDownloadURL, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("未在 Release 资产中找到适用于 linux-%s 的安全静态构建包", runtime.GOARCH)
+}
+
 func (u *Updater) downloadChannel(ctx context.Context, channel string, token string, mirror string, proxyClient *http.Client) error {
 	apiURL := "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 	if channel == "alpha" {
@@ -251,37 +283,25 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 		return fmt.Errorf("API 访问被拒 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var targetTag, downloadURL string
+	var targetTag string
+	var assets []releaseAsset
+
+	// 👑 统一提取版本号与资产列表，消灭两套逻辑的差异
 	if channel == "stable" {
 		var rel struct {
-			TagName string `json:"tag_name"`
-			Assets  []struct {
-				Name               string `json:"name"`
-				BrowserDownloadURL string `json:"browser_download_url"`
-			} `json:"assets"`
+			TagName string         `json:"tag_name"`
+			Assets  []releaseAsset `json:"assets"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
 			return fmt.Errorf("解析 Stable JSON 失败: %w", err)
 		}
 		targetTag = rel.TagName
-		for _, a := range rel.Assets {
-			name := a.Name
-			// 关键条件：严格以 "-linux-amd64.tar.gz" 结尾！
-			// 这样会自动排除 "-glibc.tar.gz"、"-musl.tar.gz" 以及 "-amd64v3.tar.gz"
-			expectedSuffix := fmt.Sprintf("-linux-%s.tar.gz", runtime.GOARCH)
-			if strings.HasSuffix(name, expectedSuffix) {
-				downloadURL = a.BrowserDownloadURL
-				break
-			}
-		}
+		assets = rel.Assets
 	} else {
 		var rels []struct {
-			Prerelease bool   `json:"prerelease"`
-			TagName    string `json:"tag_name"`
-			Assets     []struct {
-				Name               string `json:"name"`
-				BrowserDownloadURL string `json:"browser_download_url"`
-			} `json:"assets"`
+			Prerelease bool           `json:"prerelease"`
+			TagName    string         `json:"tag_name"`
+			Assets     []releaseAsset `json:"assets"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
 			return fmt.Errorf("解析 Alpha JSON 失败: %w", err)
@@ -289,12 +309,7 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 		for _, r := range rels {
 			if r.Prerelease {
 				targetTag = r.TagName
-				for _, a := range r.Assets {
-					if strings.Contains(a.Name, "linux-"+runtime.GOARCH) && strings.HasSuffix(a.Name, ".tar.gz") {
-						downloadURL = a.BrowserDownloadURL
-						break
-					}
-				}
+				assets = r.Assets
 				break
 			}
 		}
@@ -304,8 +319,10 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 		_ = u.store.SetSetting(ctx, "singbox_remote_"+channel+"_ver", targetTag)
 	}
 
-	if downloadURL == "" {
-		return fmt.Errorf("未找到适用于 linux-%s 的安装包", runtime.GOARCH)
+	// 👑 执行统一的资产挑选（Stable 和 Alpha 享受完全相同的安全过滤）
+	downloadURL, err := pickBestAsset(assets)
+	if err != nil {
+		return err
 	}
 
 	targetBinName := "sing-box-stable"
@@ -324,6 +341,7 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 	if mirror != "" {
 		mirroredURL := mirror + "/" + downloadURL
 		slog.Info("trying mirror download", "channel", channel, "url", mirroredURL)
+		// 👑 超时放宽至 10 分钟，杜绝 90MB 大包写入中断
 		directClient := &http.Client{Timeout: 600 * time.Second}
 		dlReq, _ := http.NewRequestWithContext(ctx, "GET", mirroredURL, nil)
 		res, dErr := directClient.Do(dlReq)
@@ -368,6 +386,7 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 		if err != nil {
 			return fmt.Errorf("解包 tar 失败: %w", err)
 		}
+
 		if !header.FileInfo().IsDir() && strings.HasSuffix(header.Name, "sing-box") {
 			tmpPath := fmt.Sprintf("%s.tmp.%d", targetPath, time.Now().UnixNano())
 			var success bool
@@ -388,20 +407,16 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 				return fmt.Errorf("写入本地二进制中断 (已写 %d 字节): %w", written, err)
 			}
 
-			// 自检合法性
 			ver := detectLocalBinVersion(tmpPath)
 			if strings.Contains(ver, "异常") || strings.Contains(ver, "损坏") || ver == "未安装" {
 				return fmt.Errorf("二进制校验失败 (%s)，已自动回滚销毁", ver)
 			}
 
-			// 原子重命名
 			if err := os.Rename(tmpPath, targetPath); err != nil {
 				return fmt.Errorf("原子替换二进制失败: %w", err)
 			}
 
-			// 👑 关键：下载成功后持久化进数据库！后续 GetStatus 永不探测磁盘
 			_ = u.store.SetSetting(ctx, "singbox_local_"+channel+"_ver", ver)
-
 			success = true
 			found = true
 			slog.Info("sing-box updated and persisted to DB", "channel", channel, "version", ver)
