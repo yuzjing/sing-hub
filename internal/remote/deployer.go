@@ -61,6 +61,31 @@ func PingTarget(endpoint string, port int, timeout time.Duration) (int64, error)
 	return time.Since(start).Milliseconds(), nil
 }
 
+func resolveSSHTarget(d model.Device) (string, int) {
+	raw := strings.TrimSpace(d.SSHHost)
+	if raw == "" && len(d.Endpoints) > 0 {
+		raw = strings.TrimSpace(d.Endpoints[0])
+	}
+	port := d.SSHPort
+	if port <= 0 {
+		port = 22
+	}
+	if raw == "" {
+		return "", port
+	}
+
+	host := raw
+	if h, p, err := net.SplitHostPort(raw); err == nil {
+		host = h
+		if parsedP, err := strconv.Atoi(p); err == nil && parsedP > 0 && d.SSHPort <= 0 {
+			port = parsedP
+		}
+	} else {
+		host = strings.Trim(raw, "[]")
+	}
+	return host, port
+}
+
 func PingAllNodes(devices []model.Device, timeout time.Duration) []NodePingReport {
 	var wg sync.WaitGroup
 	reports := make([]NodePingReport, 0, len(devices))
@@ -128,14 +153,9 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 		}
 	}
 
-	if len(d.Endpoints) == 0 || d.SSHUser == "" {
-		return res, fmt.Errorf("节点缺失通信端点或 SSH 用户")
-	}
-
-	endpoint := d.Endpoints[0]
-	port := d.SSHPort
-	if port <= 0 {
-		port = 22
+	endpoint, port := resolveSSHTarget(d)
+	if endpoint == "" || d.SSHUser == "" {
+		return res, fmt.Errorf("节点缺失 SSH 地址或 SSH 用户")
 	}
 
 	var authMethods []ssh.AuthMethod
@@ -254,9 +274,9 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 	case "docker":
 		checkCmd = fmt.Sprintf("%s docker exec -i %s sing-box check -c /dev/stdin < %s", envPrefix, svc, tempPath)
 	case "standalone":
-		checkCmd = fmt.Sprintf("%s (sing-box check -c %s 2>&1 || true)", envPrefix, tempPath)
+		checkCmd = fmt.Sprintf("%s sing-box check -c %s", envPrefix, tempPath)
 	default: // systemd (若宿主机有二进制用宿主机，没有则借用容器/Quadlet)
-		checkCmd = fmt.Sprintf("%s (sing-box check -c %s 2>&1 || podman exec -i %s sing-box check -c /dev/stdin < %s 2>&1)", envPrefix, tempPath, svc, tempPath)
+		checkCmd = fmt.Sprintf("%s if command -v sing-box >/dev/null 2>&1; then sing-box check -c %s; else podman exec -i %s sing-box check -c /dev/stdin < %s; fi", envPrefix, tempPath, svc, tempPath)
 	}
 
 	sess2, _ := client.NewSession()
@@ -278,12 +298,11 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 	var reloadCmd, statusCmd string
 	switch d.DeployStrategy {
 	case "podman":
-		// Quadlet 或原生 Podman：优先用 systemctl --user 重启，若不是 Quadlet 则用 podman restart
 		reloadCmd = fmt.Sprintf("%s (systemctl --user restart %s 2>/dev/null || podman restart %s)", envPrefix, svc, svc)
-		statusCmd = fmt.Sprintf("%s (systemctl --user is-active --quiet %s 2>/dev/null || podman inspect -f '{{.State.Running}}' %s 2>/dev/null)", envPrefix, svc, svc)
+		statusCmd = fmt.Sprintf(`%s (systemctl --user is-active --quiet %s 2>/dev/null || [ "$(podman inspect -f '{{.State.Running}}' %s 2>/dev/null)" = "true" ])`, envPrefix, svc, svc)
 	case "docker":
 		reloadCmd = fmt.Sprintf("%s docker restart %s", envPrefix, svc)
-		statusCmd = fmt.Sprintf("%s docker inspect -f '{{.State.Running}}' %s", envPrefix, svc)
+		statusCmd = fmt.Sprintf(`%s [ "$(docker inspect -f '{{.State.Running}}' %s 2>/dev/null)" = "true" ]`, envPrefix, svc)
 	case "standalone":
 		reloadCmd = "echo '已替换配置文件 (无守护进程策略)'"
 		statusCmd = "true"
@@ -311,7 +330,8 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 	_, statusErr := sessStatus.CombinedOutput(statusCmd)
 	sessStatus.Close()
 
-	if statusErr != nil {
+	serviceHealthy := statusErr == nil
+	if !serviceHealthy {
 		logOut("⚠️ 警告: 服务重载后未能处于 Active/Running 状态，正在抓取错误日志现场...")
 		sessLog, _ := client.NewSession()
 		var logCaptureCmd string
@@ -328,7 +348,7 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 		logOut("守护进程运行状态健康 (Active/Running) ✓")
 	}
 
-	// 再次探测一次版本（若初次未成功抓取到）
+	// 再次探测一次版本（若初次未成功抓取到，保留原逻辑）
 	if res.RemoteVersion == "待同步探测" {
 		sessV2, _ := client.NewSession()
 		vOut2, _ := sessV2.CombinedOutput(verProbeCmd)
@@ -349,12 +369,20 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 
 	if err == nil && remoteSHA == localSHA {
 		logOut(fmt.Sprintf("校验和完美匹配: %s", remoteSHA[:8]))
-		res.Success = true
 		res.VerifiedHash = remoteSHA[:8]
 	} else {
 		logOut("警告: 远端物理文件 SHA256 与本地编译快照存在细微出入")
+		res.Logs = logs.String()
+		return res, fmt.Errorf("远端配置校验和不匹配")
 	}
 
+	if !serviceHealthy {
+		res.Logs = logs.String()
+		return res, fmt.Errorf("配置已推送，但远端服务未能正常启动")
+	}
+
+	res.Success = true
 	res.Logs = logs.String()
 	return res, nil
+
 }

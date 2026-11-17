@@ -31,6 +31,7 @@ func (s *Server) RegisterStatic() {
 	s.mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		// API 和订阅路由直接放行
 		if strings.HasPrefix(r.URL.Path, "/api") || strings.HasPrefix(r.URL.Path, "/sub") {
+			http.NotFound(w, r)
 			return
 		}
 

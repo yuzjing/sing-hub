@@ -761,93 +761,131 @@ func (s *Store) DumpSQL(ctx context.Context) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("-- Sing-Hub Database Dump (Complete State)\n\n")
 
-	cRows, err := s.db.QueryContext(ctx, "SELECT id, name, category, scope_tag, sing_box_version, mount_path, strategy, payload_tmpl, description, updated_at FROM components")
-	if err == nil {
-		defer cRows.Close()
-		for cRows.Next() {
+	if err := func() error {
+		rows, err := s.db.QueryContext(ctx, "SELECT id, name, category, scope_tag, sing_box_version, mount_path, strategy, payload_tmpl, description, updated_at FROM components")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
 			var c model.Component
-			_ = cRows.Scan(&c.ID, &c.Name, &c.Category, &c.ScopeTag, &c.SingBoxVersion, &c.MountPath, &c.Strategy, &c.PayloadTmpl, &c.Description, &c.UpdatedAt)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO components VALUES (%q, %q, %q, %q, %q, %q, %q, %q, %q, %q);\n",
-				c.ID, c.Name, c.Category, c.ScopeTag, c.SingBoxVersion, c.MountPath, c.Strategy, c.PayloadTmpl, c.Description, c.UpdatedAt.Format(time.RFC3339)))
+			if err := rows.Scan(&c.ID, &c.Name, &c.Category, &c.ScopeTag, &c.SingBoxVersion, &c.MountPath, &c.Strategy, &c.PayloadTmpl, &c.Description, &c.UpdatedAt); err != nil {
+				return err
+			}
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO components VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);\n",
+				sqlQuote(c.ID), sqlQuote(c.Name), sqlQuote(c.Category), sqlQuote(c.ScopeTag), sqlQuote(c.SingBoxVersion),
+				sqlQuote(c.MountPath), sqlQuote(string(c.Strategy)), sqlQuote(c.PayloadTmpl), sqlQuote(c.Description),
+				sqlQuote(c.UpdatedAt.Format(time.RFC3339))))
 		}
-		if err := cRows.Err(); err != nil {
-			return "", err
-		}
+		return rows.Err()
+	}(); err != nil {
+		return "", err
 	}
 
-	mRows, err := s.db.QueryContext(ctx, "SELECT id, template_id, name, category, params_json, tags_json, description, updated_at FROM modules")
-	if err == nil {
-		defer mRows.Close()
-		for mRows.Next() {
+	if err := func() error {
+		rows, err := s.db.QueryContext(ctx, "SELECT id, template_id, name, category, params_json, tags_json, description, updated_at FROM modules")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
 			var m model.Module
 			var tagsJSON string
-			_ = mRows.Scan(&m.ID, &m.TemplateID, &m.Name, &m.Category, &m.ParamsJSON, &tagsJSON, &m.Description, &m.UpdatedAt)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO modules VALUES (%q, %q, %q, %q, %q, %q, %q, %q);\n",
-				m.ID, m.TemplateID, m.Name, m.Category, m.ParamsJSON, tagsJSON, m.Description, m.UpdatedAt.Format(time.RFC3339)))
+			if err := rows.Scan(&m.ID, &m.TemplateID, &m.Name, &m.Category, &m.ParamsJSON, &tagsJSON, &m.Description, &m.UpdatedAt); err != nil {
+				return err
+			}
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO modules VALUES (%s, %s, %s, %s, %s, %s, %s, %s);\n",
+				sqlQuote(m.ID), sqlQuote(m.TemplateID), sqlQuote(m.Name), sqlQuote(m.Category),
+				sqlQuote(m.ParamsJSON), sqlQuote(tagsJSON), sqlQuote(m.Description), sqlQuote(m.UpdatedAt.Format(time.RFC3339))))
 		}
-		if err := mRows.Err(); err != nil {
-			return "", err
-		}
+		return rows.Err()
+	}(); err != nil {
+		return "", err
 	}
 
-	pRows, err := s.db.QueryContext(ctx, "SELECT id, name, token, tags_json, description, sing_box_version, enable_subscribe, enable_ping, enable_push, updated_at FROM profiles")
-	if err == nil {
-		defer pRows.Close()
-		for pRows.Next() {
+	if err := func() error {
+		rows, err := s.db.QueryContext(ctx, "SELECT id, name, token, tags_json, description, sing_box_version, enable_subscribe, enable_ping, enable_push, updated_at FROM profiles")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
 			var id, name, token, tagsJSON, desc, sbv string
 			var sub, ping, push int
 			var u time.Time
-			_ = pRows.Scan(&id, &name, &token, &tagsJSON, &desc, &sbv, &sub, &ping, &push, &u)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO profiles VALUES (%q, %q, %q, %q, %q, %q, %d, %d, %d, %q);\n",
-				id, name, token, tagsJSON, desc, sbv, sub, ping, push, u.Format(time.RFC3339)))
+			if err := rows.Scan(&id, &name, &token, &tagsJSON, &desc, &sbv, &sub, &ping, &push, &u); err != nil {
+				return err
+			}
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO profiles VALUES (%s, %s, %s, %s, %s, %s, %d, %d, %d, %s);\n",
+				sqlQuote(id), sqlQuote(name), sqlQuote(token), sqlQuote(tagsJSON), sqlQuote(desc), sqlQuote(sbv),
+				sub, ping, push, sqlQuote(u.Format(time.RFC3339))))
 		}
-		if err := pRows.Err(); err != nil {
-			return "", err
-		}
+		return rows.Err()
+	}(); err != nil {
+		return "", err
 	}
 
-	pmRows, err := s.db.QueryContext(ctx, "SELECT id, profile_id, module_id, order_index FROM profile_modules")
-	if err == nil {
-		defer pmRows.Close()
-		for pmRows.Next() {
+	if err := func() error {
+		rows, err := s.db.QueryContext(ctx, "SELECT id, profile_id, module_id, order_index FROM profile_modules")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
 			var id, pid, mid string
 			var order int
-			_ = pmRows.Scan(&id, &pid, &mid, &order)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO profile_modules VALUES (%q, %q, %q, %d);\n", id, pid, mid, order))
+			if err := rows.Scan(&id, &pid, &mid, &order); err != nil {
+				return err
+			}
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO profile_modules VALUES (%s, %s, %s, %d);\n",
+				sqlQuote(id), sqlQuote(pid), sqlQuote(mid), order))
 		}
-		if err := pmRows.Err(); err != nil {
-			return "", err
-		}
+		return rows.Err()
+	}(); err != nil {
+		return "", err
 	}
 
-	dRows, err := s.db.QueryContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, last_remote_ver, tags_json, enable_ping, enable_push, description, updated_at FROM devices")
-	if err == nil {
-		defer dRows.Close()
-		for dRows.Next() {
+	if err := func() error {
+		rows, err := s.db.QueryContext(ctx, "SELECT id, name, endpoints_json, props_json, ssh_host, target_profile_id, auth_type, auth_secret, key_path, ssh_user, ssh_port, remote_path, deploy_strategy, service_name, last_remote_ver, tags_json, enable_ping, enable_push, description, updated_at FROM devices")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
 			var d model.Device
 			var eps, props, tags string
 			var ping, push int
 			var u time.Time
-			_ = dRows.Scan(&d.ID, &d.Name, &eps, &props, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &d.LastRemoteVer, &tags, &ping, &push, &d.Description, &u)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO devices VALUES (%q, %q, %q, %q, %q, %q, %q, %q, %q, %q, %d, %q, %q, %q, %q, %q, %d, %d, %q, %q);\n",
-				d.ID, d.Name, eps, props, d.SSHHost, d.TargetProfileID, d.AuthType, d.AuthSecret, d.KeyPath, d.SSHUser, d.SSHPort, d.RemotePath, d.DeployStrategy, d.ServiceName, d.LastRemoteVer, tags, ping, push, d.Description, u.Format(time.RFC3339)))
+			if err := rows.Scan(&d.ID, &d.Name, &eps, &props, &d.SSHHost, &d.TargetProfileID, &d.AuthType, &d.AuthSecret, &d.KeyPath, &d.SSHUser, &d.SSHPort, &d.RemotePath, &d.DeployStrategy, &d.ServiceName, &d.LastRemoteVer, &tags, &ping, &push, &d.Description, &u); err != nil {
+				return err
+			}
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO devices VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s, %d, %d, %s, %s);\n",
+				sqlQuote(d.ID), sqlQuote(d.Name), sqlQuote(eps), sqlQuote(props), sqlQuote(d.SSHHost), sqlQuote(d.TargetProfileID),
+				sqlQuote(d.AuthType), sqlQuote(d.AuthSecret), sqlQuote(d.KeyPath), sqlQuote(d.SSHUser), d.SSHPort,
+				sqlQuote(d.RemotePath), sqlQuote(d.DeployStrategy), sqlQuote(d.ServiceName), sqlQuote(d.LastRemoteVer),
+				sqlQuote(tags), ping, push, sqlQuote(d.Description), sqlQuote(u.Format(time.RFC3339))))
 		}
-		if err := dRows.Err(); err != nil {
-			return "", err
-		}
+		return rows.Err()
+	}(); err != nil {
+		return "", err
 	}
 
-	setRows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings")
-	if err == nil {
-		defer setRows.Close()
-		for setRows.Next() {
+	if err := func() error {
+		rows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
 			var k, v string
-			_ = setRows.Scan(&k, &v)
-			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO settings VALUES (%q, %q);\n", k, v))
+			if err := rows.Scan(&k, &v); err != nil {
+				return err
+			}
+			sb.WriteString(fmt.Sprintf("INSERT OR REPLACE INTO settings VALUES (%s, %s);\n", sqlQuote(k), sqlQuote(v)))
 		}
-		if err := setRows.Err(); err != nil {
-			return "", err
-		}
+		return rows.Err()
+	}(); err != nil {
+		return "", err
 	}
 
 	return sb.String(), nil
@@ -863,12 +901,7 @@ func (s *Store) RestoreSQL(ctx context.Context, sqlScript string) error {
 	}
 	defer tx.Rollback()
 
-	statements := strings.Split(sqlScript, ";")
-	for _, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" || strings.HasPrefix(stmt, "--") {
-			continue
-		}
+	for _, stmt := range splitSQLStatements(sqlScript) {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("restore error: %w (stmt: %s)", err, stmt)
 		}
@@ -876,10 +909,53 @@ func (s *Store) RestoreSQL(ctx context.Context, sqlScript string) error {
 	return tx.Commit()
 }
 
+func sqlQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+func splitSQLStatements(script string) []string {
+	var stmts []string
+	var buf strings.Builder
+	inQuote := false
+
+	for i := 0; i < len(script); i++ {
+		ch := script[i]
+		if !inQuote && ch == '-' && i+1 < len(script) && script[i+1] == '-' {
+			for i < len(script) && script[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if ch == '\'' {
+			buf.WriteByte(ch)
+			if inQuote && i+1 < len(script) && script[i+1] == '\'' {
+				buf.WriteByte(script[i+1])
+				i++
+			} else {
+				inQuote = !inQuote
+			}
+			continue
+		}
+		if ch == ';' && !inQuote {
+			if stmt := strings.TrimSpace(buf.String()); stmt != "" {
+				stmts = append(stmts, stmt)
+			}
+			buf.Reset()
+			continue
+		}
+		buf.WriteByte(ch)
+	}
+
+	if tail := strings.TrimSpace(buf.String()); tail != "" {
+		stmts = append(stmts, tail)
+	}
+	return stmts
+}
+
 func quoteSlice(ids []string) string {
 	quoted := make([]string, len(ids))
 	for i, id := range ids {
-		quoted[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(id, "'", "''"))
+		quoted[i] = sqlQuote(id)
 	}
 	return strings.Join(quoted, ",")
 }

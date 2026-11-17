@@ -36,10 +36,6 @@ type Updater struct {
 	isRunning bool
 	lastError string
 	lastCheck time.Time
-
-	// 👑 关键架构优化：内存版本缓存，杜绝重复 fork 进程唤醒 CPU
-	cachedStableVer string
-	cachedAlphaVer  string
 }
 
 type UpdaterStatus struct {
@@ -82,14 +78,6 @@ func New(s *store.Store, binDir string) *Updater {
 	return u
 }
 
-// 刷新内存缓存（调用时需持有锁或在单协程初始化阶段）
-func (u *Updater) refreshLocalVersionsLocked() {
-	stableBin := filepath.Join(u.binDir, "sing-box-stable")
-	alphaBin := filepath.Join(u.binDir, "sing-box-alpha")
-	u.cachedStableVer = detectLocalBinVersion(stableBin)
-	u.cachedAlphaVer = detectLocalBinVersion(alphaBin)
-}
-
 func detectLocalBinVersion(binPath string) string {
 	info, err := os.Stat(binPath)
 	if err != nil {
@@ -121,8 +109,8 @@ func detectLocalBinVersion(binPath string) string {
 }
 
 func (u *Updater) GetStatus(ctx context.Context) UpdaterStatus {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+	u.mu.RLock()
+	defer u.mu.RUnlock()
 
 	lastCheckStr := "-"
 	if !u.lastCheck.IsZero() {
@@ -163,8 +151,7 @@ func (u *Updater) TriggerUpdate(ctx context.Context) {
 		} else {
 			u.lastError = ""
 		}
-		// 👑 更新完成后，刷新一次内存版本
-		u.refreshLocalVersionsLocked()
+
 		u.mu.Unlock()
 	}()
 }
@@ -333,6 +320,7 @@ func (u *Updater) downloadChannel(ctx context.Context, channel string, token str
 
 	// 本地存在且运行正常，版本相同则直接跳过
 	if detectLocalBinVersion(targetPath) == targetTag {
+		_ = u.store.SetSetting(ctx, "singbox_local_"+channel+"_ver", targetTag)
 		slog.Info("sing-box is already up to date", "channel", channel, "version", targetTag)
 		return nil
 	}

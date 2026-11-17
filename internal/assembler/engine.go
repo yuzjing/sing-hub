@@ -89,51 +89,66 @@ func (e *Engine) resolveNodeReferences(ctx context.Context, params map[string]an
 	if err != nil {
 		return
 	}
-	devMap := make(map[string]model.Device)
+	devMap := make(map[string]model.Device, len(devices))
 	for _, d := range devices {
 		devMap[d.ID] = d
 	}
 
-	var walk func(m map[string]any)
-	walk = func(m map[string]any) {
-		for k, v := range m {
-			if strVal, ok := v.(string); ok && strings.HasPrefix(strVal, "@node:") {
-				parts := strings.Split(strings.TrimPrefix(strVal, "@node:"), ".")
-				if len(parts) >= 2 {
-					nodeID := parts[0]
-					prop := parts[1]
-					if dev, exists := devMap[nodeID]; exists {
-						found := false
-						for _, p := range dev.Props {
-							if p.Key == prop {
-								m[k] = p.Value
-								found = true
-								break
-							}
-						}
-						if !found {
-							switch prop {
-							case "endpoint":
-								if len(dev.Endpoints) > 0 {
-									m[k] = dev.Endpoints[0]
-								} else {
-									m[k] = "127.0.0.1"
-								}
-							case "ssh_host":
-								m[k] = dev.SSHHost
-							case "id":
-								m[k] = dev.ID
-							case "name":
-								m[k] = dev.Name
-							}
-						}
-					}
-				}
-			} else if subMap, ok := v.(map[string]any); ok {
-				walk(subMap)
+	resolveString := func(strVal string) any {
+		if !strings.HasPrefix(strVal, "@node:") {
+			return strVal
+		}
+		parts := strings.SplitN(strings.TrimPrefix(strVal, "@node:"), ".", 2)
+		if len(parts) < 2 {
+			return strVal
+		}
+		nodeID, prop := parts[0], parts[1]
+		dev, exists := devMap[nodeID]
+		if !exists {
+			return strVal
+		}
+		for _, p := range dev.Props {
+			if p.Key == prop {
+				return p.Value
 			}
 		}
+		switch prop {
+		case "endpoint":
+			if len(dev.Endpoints) > 0 {
+				return dev.Endpoints[0]
+			}
+			return "127.0.0.1"
+		case "ssh_host":
+			return dev.SSHHost
+		case "id":
+			return dev.ID
+		case "name":
+			return dev.Name
+		default:
+			return strVal
+		}
 	}
+
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch val := v.(type) {
+		case string:
+			return resolveString(val)
+		case map[string]any:
+			for k, item := range val {
+				val[k] = walk(item)
+			}
+			return val
+		case []any:
+			for i, item := range val {
+				val[i] = walk(item)
+			}
+			return val
+		default:
+			return v
+		}
+	}
+
 	walk(params)
 }
 

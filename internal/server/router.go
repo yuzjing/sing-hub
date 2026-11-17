@@ -2,6 +2,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,7 +169,8 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ETag 基于配置内容 Hash，支持 304 缓存跳过数据传输
-	etag := fmt.Sprintf(`"%x"`, profile.UpdatedAt.UnixNano())
+	sum := sha256.Sum256(data)
+	etag := fmt.Sprintf(`"%x"`, sum)
 	if match := r.Header.Get("If-None-Match"); match == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
