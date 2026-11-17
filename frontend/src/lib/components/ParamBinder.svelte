@@ -6,14 +6,14 @@
   interface Props {
     templateVars?: string[];
     templateCode?: string;
-    params?: Record<string, string | number | boolean>;
+    params?: Record<string, unknown>;
     onChange?: () => void;
   }
 
   let {
     templateVars = [],
     templateCode = '',
-    params = $bindable<Record<string, string | number | boolean>>({}),
+    params = $bindable<Record<string, unknown>>({}),
     onChange = () => {}
   }: Props = $props();
 
@@ -53,10 +53,21 @@
   }
 
   function handleInputChange(varKey: string, rawVal: string) {
-    let parsed: string | number | boolean = rawVal;
-    if (rawVal.trim() !== '' && !isNaN(Number(rawVal))) parsed = Number(rawVal);
-    else if (rawVal.toLowerCase() === 'true') parsed = true;
-    else if (rawVal.toLowerCase() === 'false') parsed = false;
+    const trimmed = rawVal.trim();
+    let parsed: unknown = rawVal;
+    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        parsed = rawVal;
+      }
+    } else if (trimmed !== '' && !isNaN(Number(trimmed))) {
+      parsed = Number(trimmed);
+    } else if (trimmed.toLowerCase() === 'true') {
+      parsed = true;
+    } else if (trimmed.toLowerCase() === 'false') {
+      parsed = false;
+    }
     params[varKey] = parsed;
     onChange();
   }
@@ -80,8 +91,9 @@
     <!-- 优化栅格：在流式容器内自适应，避免小屏下被硬分 2 列挤爆 -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-h-104 overflow-y-auto pr-1">
       {#each filteredVars as v (v)}
-        {@const curVal = String(params[v] ?? '')}
-        {@const isRef = curVal.startsWith('@node:')}
+        {@const rawParam = params[v]}
+        {@const curVal = typeof rawParam === 'object' && rawParam !== null ? JSON.stringify(rawParam) : String(rawParam ?? '')}
+        {@const isRef = typeof rawParam === 'string' && rawParam.startsWith('@node:')}
         {@const targetField = fieldMap[v]}
 
         <div class="rounded-xl border border-zinc-200/80 bg-white p-3 shadow-xs dark:border-zinc-800 dark:bg-zinc-950/80 space-y-2 transition-all hover:border-blue-300 dark:hover:border-blue-800">

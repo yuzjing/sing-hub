@@ -73,7 +73,8 @@
   });
   let availableTags = $derived.by(() => Object.keys(tagCounts));
 
-  let testParams = $state<Record<string, string | number | boolean>>({});
+  let savingComp = $state(false);
+  let testParams = $state<Record<string, unknown>>({});
   let previewTimer: ReturnType<typeof setTimeout> | null = null;
   let lastLoadedCompId = '';
 
@@ -189,15 +190,20 @@
   }
 
   async function saveComp() {
-    if (!selectedComp) return;
-    selectedComp.payload_tmpl = studioTmplCode;
-    await api.saveComponent(selectedComp);
-    await ws.loadComponents();
-    await ws.loadProfiles();
-    isDirty = false;
-    lastSavedAt = new Date().toLocaleTimeString();
-    ws.showToast('母版已保存并提交 Git ✓', 'success');
-    if (ws.activeProfileId) ws.triggerCompile();
+    if (savingComp || !selectedComp) return;
+    savingComp = true;
+    try {
+      selectedComp.payload_tmpl = studioTmplCode;
+      await api.saveComponent(selectedComp);
+      await ws.loadComponents();
+      await ws.loadProfiles();
+      isDirty = false;
+      lastSavedAt = new Date().toLocaleTimeString();
+      ws.showToast('母版已保存并提交 Git ✓', 'success');
+      if (ws.activeProfileId) ws.triggerCompile();
+    } finally {
+      savingComp = false;
+    }
   }
 </script>
 
@@ -364,11 +370,12 @@
 
             <button
               onclick={saveComp}
+              disabled={savingComp}
               type="button"
-              class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap"
+              class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Icon name="check" size={14} />
-              <span>{isDirty ? '保存母版 *' : '保存母版'}</span>
+              <span>{savingComp ? '保存中...' : (isDirty ? '保存母版 *' : '保存母版')}</span>
             </button>
           </div>
         </div>
@@ -402,13 +409,24 @@
                 <label class="block">
                   <span class="text-[11px] font-mono font-bold text-zinc-600 dark:text-zinc-400 block mb-1 truncate" title={v}>.{v}</span>
                   <input
-                    value={testParams[v] ?? ''}
+                    value={typeof testParams[v] === 'object' && testParams[v] !== null ? JSON.stringify(testParams[v]) : (testParams[v] ?? '')}
                     oninput={(e) => {
                       const val = (e.target as HTMLInputElement).value;
-                      let parsed: string | number | boolean = val;
-                      if (val.trim() !== '' && !isNaN(Number(val))) parsed = Number(val);
-                      else if (val.toLowerCase() === 'true') parsed = true;
-                      else if (val.toLowerCase() === 'false') parsed = false;
+                      const trimmed = val.trim();
+                      let parsed: unknown = val;
+                      if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+                        try {
+                          parsed = JSON.parse(trimmed);
+                        } catch {
+                          parsed = val;
+                        }
+                      } else if (trimmed !== '' && !isNaN(Number(trimmed))) {
+                        parsed = Number(trimmed);
+                      } else if (trimmed.toLowerCase() === 'true') {
+                        parsed = true;
+                      } else if (trimmed.toLowerCase() === 'false') {
+                        parsed = false;
+                      }
                       testParams[v] = parsed;
                       triggerPreviewDebounced();
                     }}

@@ -351,19 +351,19 @@
   <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-full border border-zinc-700 bg-zinc-900/95 px-5 py-2.5 shadow-2xl backdrop-blur-md text-xs text-white">
     {#if selectedCompIds.length > 0}
       <span>已选 <strong>{selectedCompIds.length}</strong> 个母版</span>
-      <button onclick={() => triggerConfirm('确认批量删除？', '即将永久删除已选的 ' + selectedCompIds.length + ' 个母版。', () => { ws.batchDeleteComponents(selectedCompIds); selectedCompIds = []; isCompManageMode = false; })} type="button" class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
+      <button onclick={() => triggerConfirm('确认批量删除？', '即将永久删除已选的 ' + selectedCompIds.length + ' 个母版。', async () => { await ws.batchDeleteComponents(selectedCompIds); selectedCompIds = []; isCompManageMode = false; })} type="button" class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
       <button onclick={() => { selectedCompIds = []; isCompManageMode = false; }} type="button" class="text-zinc-400 hover:text-white cursor-pointer">取消</button>
     {:else if selectedModuleIds.length > 0}
       <span>已选 <strong>{selectedModuleIds.length}</strong> 个成品积木</span>
-      <button onclick={() => triggerConfirm('确认批量删除？', '即将永久删除已选的 ' + selectedModuleIds.length + ' 个成品积木。', () => { ws.batchDeleteModules(selectedModuleIds); selectedModuleIds = []; isModuleManageMode = false; })} type="button" class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
+      <button onclick={() => triggerConfirm('确认批量删除？', '即将永久删除已选的 ' + selectedModuleIds.length + ' 个成品积木。', async () => { ws.batchDeleteModules(selectedModuleIds); selectedModuleIds = []; isModuleManageMode = false; })} type="button" class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
       <button onclick={() => { selectedModuleIds = []; isModuleManageMode = false; }} type="button" class="text-zinc-400 hover:text-white cursor-pointer">取消</button>
     {:else if selectedDeviceIds.length > 0}
       <span>已选 <strong>{selectedDeviceIds.length}</strong> 个节点</span>
-      <button onclick={() => triggerConfirm('确认批量移除？', '即将永久移除已选的 ' + selectedDeviceIds.length + ' 个节点。', () => { ws.batchDeleteDevices(selectedDeviceIds); selectedDeviceIds = []; isDeviceManageMode = false; })} type="button" class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
+      <button onclick={() => triggerConfirm('确认批量移除？', '即将永久移除已选的 ' + selectedDeviceIds.length + ' 个节点。', async () => { ws.batchDeleteDevices(selectedDeviceIds); selectedDeviceIds = []; isDeviceManageMode = false; })} type="button" class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
       <button onclick={() => { selectedDeviceIds = []; isDeviceManageMode = false; }} type="button" class="text-zinc-400 hover:text-white cursor-pointer">取消</button>
     {:else if selectedProfileIds.length > 0}
       <span>已选 <strong>{selectedProfileIds.length}</strong> 个方案配方</span>
-      <button onclick={() => triggerConfirm('确认批量删除？', '即将永久删除已选的 ' + selectedProfileIds.length + ' 个方案。', () => { ws.batchDeleteProfiles(selectedProfileIds); selectedProfileIds = []; isProfileManageMode = false; })} type="button" class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
+      <button onclick={() => triggerConfirm('确认批量删除？', '即将永久删除已选的 ' + selectedProfileIds.length + ' 个方案。', async () => { ws.batchDeleteProfiles(selectedProfileIds); selectedProfileIds = []; isProfileManageMode = false; })} type="button" class="rounded bg-rose-600 px-3 py-1 font-semibold hover:bg-rose-500 cursor-pointer">批量删除</button>
       <button onclick={() => { selectedProfileIds = []; isProfileManageMode = false; }} type="button" class="text-zinc-400 hover:text-white cursor-pointer">取消</button>
     {/if}
   </div>

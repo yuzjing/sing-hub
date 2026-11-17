@@ -8,7 +8,7 @@
     open?: boolean;
     editComponent?: Component | null;
     onClose?: () => void;
-    onSave?: (comp: Component) => void;
+    onSave?: (comp: Component) => void | Promise<void>;
   }
 
   let {
@@ -18,6 +18,8 @@
     onSave = () => {}
   }: Props = $props();
 
+  let saving = $state(false);
+  let autoDraftId = $state('');
   let id = $state('');
   let name = $state('');
   let category = $state('io');
@@ -41,6 +43,7 @@
         payloadTmpl = editComponent.payload_tmpl;
         description = editComponent.description;
       } else {
+        autoDraftId = 'comp-' + Date.now().toString(36);
         id = '';
         name = '';
         category = 'io'; // ✅ 默认排第一位的流量出入 (IO)
@@ -54,7 +57,8 @@
     }
   });
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (saving) return;
     if (!name.trim()) {
       ws.showToast('请输入母版名称', 'error');
       return;
@@ -70,20 +74,25 @@
       return;
     }
     if (!finalId) {
-      finalId = 'comp-' + Date.now().toString(36);
+      finalId = autoDraftId || ('comp-' + Date.now().toString(36));
     }
 
-    onSave({
-      id: finalId,
-      name: name.trim(),
-      category,
-      scope_tag: scopeTag.trim() || 'universal',
-      sing_box_version: singBoxVersion.trim() || 'universal',
-      mount_path: mountPath.trim(),
-      strategy,
-      payload_tmpl: payloadTmpl.trim(),
-      description: description.trim(),
-    });
+    saving = true;
+    try {
+      await onSave({
+        id: finalId,
+        name: name.trim(),
+        category,
+        scope_tag: scopeTag.trim() || 'universal',
+        sing_box_version: singBoxVersion.trim() || 'universal',
+        mount_path: mountPath.trim(),
+        strategy,
+        payload_tmpl: payloadTmpl.trim(),
+        description: description.trim(),
+      });
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -184,8 +193,8 @@
       </div>
 
       <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">取消</button>
-        <button onclick={handleSubmit} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">保存母版元数据</button>
+        <button onclick={onClose} disabled={saving} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer disabled:opacity-50">取消</button>
+        <button onclick={handleSubmit} disabled={saving} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">{saving ? '保存中...' : '保存母版元数据'}</button>
       </div>
     </div>
   </div>

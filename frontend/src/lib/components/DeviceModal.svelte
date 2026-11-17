@@ -8,11 +8,13 @@
     open?: boolean;
     editDevice?: Device | null;
     onClose?: (e?: MouseEvent) => void;
-    onSave?: (d: Device) => void;
+    onSave?: (d: Device) => void | Promise<void>;
   }
 
   let { open = false, editDevice = null, onClose = () => {}, onSave = () => {} }: Props = $props();
 
+  let saving = $state(false);
+  let autoDraftId = $state('');
   let id = $state('');
   let name = $state('');
   let targetProfileId = $state('');
@@ -60,6 +62,7 @@
               value: ep
             }));
       } else {
+        autoDraftId = 'node-' + Date.now().toString(36);
         id = '';
         name = '';
         targetProfileId = ws.profiles[0]?.id || '';
@@ -89,35 +92,40 @@
     dynamicProps = dynamicProps.filter((_: DeviceProp, i: number) => i !== idx);
   }
 
-  function handleSave() {
+  async function handleSave() {
+    if (saving) return;
     if (!name.trim()) {
       ws.showToast('请输入节点名称', 'error');
       return;
     }
-    let finalId = id.trim() || 'node-' + Date.now().toString(36);
-
+    const finalId = id.trim() || autoDraftId || ('node-' + Date.now().toString(36));
     const endpoints = dynamicProps.map((p: DeviceProp) => p.value.trim()).filter((v: string) => v !== '');
 
-    onSave({
-      id: finalId,
-      name: name.trim(),
-      endpoints,
-      props: dynamicProps.filter((p: DeviceProp) => p.key.trim() !== ''),
-      ssh_host: sshHost.trim(),
-      ssh_port: sshPort || 22,
-      ssh_user: sshUser.trim() || 'root',
-      auth_type: authType,
-      auth_secret: authSecret,
-      key_path: keyPath.trim(),
-      remote_path: remotePath.trim() || '~/.config/sing-box/config.json',
-      deploy_strategy: deployStrategy,
-      service_name: serviceName.trim() || 'sing-box',
-      target_profile_id: targetProfileId,
-      tags: tagsStr.split(/[,，\s]+/).map((s: string) => s.trim()).filter(Boolean),
-      enable_ping: enablePing,
-      enable_push: enablePush,
-      description: description.trim(),
-    });
+    saving = true;
+    try {
+      await onSave({
+        id: finalId,
+        name: name.trim(),
+        endpoints,
+        props: dynamicProps.filter((p: DeviceProp) => p.key.trim() !== ''),
+        ssh_host: sshHost.trim(),
+        ssh_port: sshPort || 22,
+        ssh_user: sshUser.trim() || 'root',
+        auth_type: authType,
+        auth_secret: authSecret,
+        key_path: keyPath.trim(),
+        remote_path: remotePath.trim() || '~/.config/sing-box/config.json',
+        deploy_strategy: deployStrategy,
+        service_name: serviceName.trim() || 'sing-box',
+        target_profile_id: targetProfileId,
+        tags: tagsStr.split(/[,，\s]+/).map((s: string) => s.trim()).filter(Boolean),
+        enable_ping: enablePing,
+        enable_push: enablePush,
+        description: description.trim(),
+      });
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -242,8 +250,8 @@
       </div>
 
       <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800 shrink-0">
-        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">取消</button>
-        <button onclick={handleSave} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-2xs">保存节点</button>
+        <button onclick={onClose} disabled={saving} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer disabled:opacity-50">取消</button>
+        <button onclick={handleSave} disabled={saving} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed">{saving ? '保存中...' : '保存节点'}</button>
       </div>
     </div>
   </div>

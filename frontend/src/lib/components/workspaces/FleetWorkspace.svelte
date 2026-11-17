@@ -25,7 +25,9 @@
   }: Props = $props();
 
   let isDeployingId = $state<string>('');
+  let deployDeviceName = $state<string>('');
   let editingPathDevId = $state<string>('');
+  let savingPathId = $state<string>('');
   let tempRemotePath = $state('');
   let expandedPropDevIds = $state<string[]>([]);
   let selectedFilterTags = $state<string[]>([]);
@@ -61,8 +63,9 @@
   let pushReadyCount = $derived.by(() => ws.devices.filter((d: Device) => d.enable_push && !!d.target_profile_id).length);
 
   async function handleDeploy(dev: Device) {
-    if (!dev.enable_push || !dev.target_profile_id) return;
+    if (isDeployingId || !dev.enable_push || !dev.target_profile_id) return;
     isDeployingId = dev.id;
+    deployDeviceName = dev.name;
     deployLogs = '';
     deployStatus = 'running';
     showDeployModal = true;
@@ -70,6 +73,7 @@
       const res = await api.deployDevice(dev.id);
       deployLogs = res.logs + `\n\n[✔] 推送与重载成功\n[i] 远端内核: ${res.remote_version}\n[i] 最终哈希: ${res.verified_hash}`;
       deployStatus = 'success';
+      await ws.loadDevices();
       ws.showToast('推送部署成功 ✓', 'success');
     } catch (e: unknown) {
       const err = e as { message?: string; logs?: string };
@@ -82,13 +86,22 @@
   }
 
   async function saveRemotePath(dev: Device) {
-    if (tempRemotePath.trim() && tempRemotePath !== dev.remote_path) {
-      dev.remote_path = tempRemotePath.trim();
-      await api.saveDevice(dev);
-      await ws.loadDevices();
-      ws.showToast('远程配置文件路径已更新 ✓', 'success');
+    if (savingPathId) return;
+    const nextPath = tempRemotePath.trim();
+    if (nextPath && nextPath !== dev.remote_path) {
+      savingPathId = dev.id;
+      try {
+        dev.remote_path = nextPath;
+        await api.saveDevice(dev);
+        await ws.loadDevices();
+        ws.showToast('远程配置文件路径已更新 ✓', 'success');
+      } finally {
+        savingPathId = '';
+        editingPathDevId = '';
+      }
+    } else {
+      editingPathDevId = '';
     }
-    editingPathDevId = '';
   }
 
   function focusEl(node: HTMLInputElement) {
@@ -385,7 +398,7 @@
 
 <DeployModal
   open={showDeployModal}
-  deviceName={ws.devices.find((d: Device) => d.id === isDeployingId)?.name || ''}
+  deviceName={deployDeviceName}
   logs={deployLogs}
   status={deployStatus}
   onClose={() => showDeployModal = false}

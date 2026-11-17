@@ -36,10 +36,17 @@
     });
   });
 
+  let mountingId = $state('');
+
   async function handleMount(m: Module) {
-    if (mountedModuleIds.has(m.id)) return;
-    await ws.attachModules([m.id]);
-    ws.showToast('已装配成品积木 [' + m.name + '] ✓', 'success');
+    if (mountingId || mountedModuleIds.has(m.id)) return;
+    mountingId = m.id;
+    try {
+      await ws.attachModules([m.id]);
+      ws.showToast('已装配成品积木 [' + m.name + '] ✓', 'success');
+    } finally {
+      mountingId = '';
+    }
   }
 </script>
 
@@ -106,8 +113,9 @@
               {:else}
                 <button
                   onclick={() => handleMount(mod)}
+                  disabled={mountingId === mod.id}
                   type="button"
-                  class="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition flex items-center gap-1"
+                  class="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition flex items-center gap-1 disabled:opacity-50"
                 >
                   <Icon name="plus" size={13} />
                   <span>装配</span>

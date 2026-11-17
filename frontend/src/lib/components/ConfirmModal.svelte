@@ -7,9 +7,10 @@
     title?: string;
     content?: string;
     actionType?: 'danger' | 'primary';
-    onConfirm?: () => void;
+    onConfirm?: () => void | Promise<void>;
     onCancel?: () => void;
   }
+  let confirming = $state(false);
 
   let {
     open = false,
@@ -19,6 +20,8 @@
     onConfirm = () => {},
     onCancel = () => {},
   }: Props = $props();
+
+  async function handleConfirm() { if (confirming) return; confirming = true; try { await onConfirm(); } finally { confirming = false; } }
 </script>
 
 {#if open}
@@ -38,16 +41,17 @@
         <button
           onclick={onCancel}
           type="button"
-          class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/60 transition cursor-pointer shadow-2xs"
+          class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/60 transition cursor-pointer shadow-2xs disabled:opacity-50"
         >
           取消
         </button>
         <button
-          onclick={onConfirm}
+          onclick={handleConfirm}
+          disabled={confirming}
           type="button"
-          class="rounded-lg px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition cursor-pointer {actionType === 'danger' ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20'}"
+          class="rounded-lg px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition cursor-pointer {actionType === 'danger' ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20'} disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          确认
+          {confirming ? '处理中...' : '确认'}
         </button>
       </div>
     </div>

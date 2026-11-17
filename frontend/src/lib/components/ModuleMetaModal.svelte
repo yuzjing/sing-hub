@@ -8,7 +8,7 @@
     open?: boolean;
     editModule?: Module | null;
     onClose?: () => void;
-    onSave?: (mod: Module) => void;
+    onSave?: (mod: Module) => void | Promise<void>;
   }
 
   let {
@@ -18,6 +18,8 @@
     onSave = () => {}
   }: Props = $props();
 
+  let saving = $state(false);
+  let autoDraftId = $state('');
   let id = $state('');
   let name = $state('');
   let templateId = $state('');
@@ -33,6 +35,7 @@
         category = editModule.category;
         tagsStr = (editModule.tags || []).join(', ');
       } else {
+        autoDraftId = 'mod-' + Date.now().toString(36);
         id = '';
         name = '';
         templateId = ws.components[0]?.id || '';
@@ -42,7 +45,8 @@
     }
   });
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (saving) return;
     if (!name.trim()) {
       ws.showToast('请输入成品积木名称', 'error');
       return;
@@ -58,7 +62,7 @@
       return;
     }
     if (!finalId) {
-      finalId = 'mod-' + Date.now().toString(36);
+      finalId = autoDraftId || ('mod-' + Date.now().toString(36));
     }
 
     const mod: Module = {
@@ -70,7 +74,13 @@
       params_json: editModule?.params_json || '{}',
       description: editModule?.description || '',
     };
-    onSave(mod);
+
+    saving = true;
+    try {
+      await onSave(mod);
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -152,11 +162,11 @@
       </div>
 
       <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">
+        <button onclick={onClose} disabled={saving} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer disabled:opacity-50">
           取消
         </button>
-        <button onclick={handleSubmit} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">
-          保存属性
+        <button onclick={handleSubmit} disabled={saving} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+          {saving ? '保存中...' : '保存属性'}
         </button>
       </div>
     </div>

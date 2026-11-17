@@ -90,17 +90,15 @@
   let usedNodes = $derived.by(() => {
     if (!draftParams) return [];
     const nodeIds = new SvelteSet<string>();
-    for (const val of Object.values(draftParams)) {
-      const s = String(val);
-      if (s.startsWith('@node:')) {
-        const parts = s.replace('@node:', '').split('.');
-        if (parts.length > 0) nodeIds.add(parts[0]);
-      }
+    const serialized = JSON.stringify(draftParams);
+    for (const m of serialized.matchAll(/@node:([a-zA-Z0-9_-]+)\./g)) {
+      nodeIds.add(m[1]);
     }
     return ws.devices.filter((d: Device) => nodeIds.has(d.id));
   });
 
-  let draftParams = $state<Record<string, string | number | boolean>>({});
+  let draftParams = $state<Record<string, unknown>>({});
+  let saving = $state(false);
   let isDirty = $state(false);
   let lastSavedAt = $state('已同步');
   let renderedChunkJSON = $state('// 实时渲染中...');
@@ -108,7 +106,7 @@
   let previewTimer: ReturnType<typeof setTimeout> | null = null;
   let lastLoadedModId = '';
 
-  function safeParse(raw: string | undefined): Record<string, string | number | boolean> {
+  function safeParse(raw: string | undefined): Record<string, unknown> {
     if (!raw) return {};
     try {
       return JSON.parse(raw);
@@ -221,15 +219,20 @@
   }
 
   async function handleSave() {
-    if (!selectedModule) return;
-    selectedModule.params_json = JSON.stringify(draftParams);
-    await api.saveModule(selectedModule);
-    await ws.loadModules();
-    await ws.loadProfiles();
-    isDirty = false;
-    lastSavedAt = new Date().toLocaleTimeString();
-    ws.showToast('积木 [' + selectedModule.name + '] 已保存 ✓', 'success');
-    if (ws.activeProfileId) ws.triggerCompile();
+    if (saving || !selectedModule) return;
+    saving = true;
+    try {
+      selectedModule.params_json = JSON.stringify(draftParams);
+      await api.saveModule(selectedModule);
+      await ws.loadModules();
+      await ws.loadProfiles();
+      isDirty = false;
+      lastSavedAt = new Date().toLocaleTimeString();
+      ws.showToast('积木 [' + selectedModule.name + '] 已保存 ✓', 'success');
+      if (ws.activeProfileId) ws.triggerCompile();
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -418,11 +421,12 @@
 
             <button
               onclick={handleSave}
+              disabled={saving}
               type="button"
-              class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap"
+              class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Icon name="check" size={14} />
-              <span>{isDirty ? '保存实参 *' : '保存积木'}</span>
+              <span>{saving ? '保存中...' : (isDirty ? '保存实参 *' : '保存积木')}</span>
             </button>
           </div>
         </div>

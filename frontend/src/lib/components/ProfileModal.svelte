@@ -18,7 +18,7 @@
       enable_subscribe: boolean;
       enable_ping: boolean;
       enable_push: boolean;
-    }) => void;
+    }) => void | Promise<void>;
   }
 
   let {
@@ -28,6 +28,7 @@
     onSave = () => {}
   }: Props = $props();
 
+  let saving = $state(false);
   let id = $state('');
   let name = $state('');
   let token = $state('');
@@ -65,22 +66,28 @@
     }
   });
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (saving) return;
     if (!name.trim()) {
       ws.showToast('请输入方案名称', 'error');
       return;
     }
-    onSave({
-      id: id || ('prof-' + Date.now().toString(36)),
-      name: name.trim(),
-      token: token.trim(),
-      tags: tagsStr.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
-      description: description.trim(),
-      sing_box_version: singBoxVersion.trim() || '1.10.0',
-      enable_subscribe: enableSubscribe,
-      enable_ping: enablePing,
-      enable_push: enablePush,
-    });
+    saving = true;
+    try {
+      await onSave({
+        id: id || ('prof-' + Date.now().toString(36)),
+        name: name.trim(),
+        token: token.trim(),
+        tags: tagsStr.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
+        description: description.trim(),
+        sing_box_version: singBoxVersion.trim() || '1.10.0',
+        enable_subscribe: enableSubscribe,
+        enable_ping: enablePing,
+        enable_push: enablePush,
+      });
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -159,11 +166,11 @@
       </div>
 
       <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-        <button onclick={onClose} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer">
+        <button onclick={onClose} disabled={saving} type="button" class="rounded-lg border border-zinc-300 px-3.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer disabled:opacity-50">
           取消
         </button>
-        <button onclick={handleSubmit} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer">
-          保存方案
+        <button onclick={handleSubmit} disabled={saving} type="button" class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+          {saving ? '保存中...' : '保存方案'}
         </button>
       </div>
     </div>

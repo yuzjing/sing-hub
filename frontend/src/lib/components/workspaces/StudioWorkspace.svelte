@@ -60,8 +60,9 @@
   let availableTags = $derived.by(() => Object.keys(tagCounts));
 
   let expandedModuleId = $state<string | null>(null);
-  let inlineDraftParams = $state<Record<string, string | number | boolean>>({});
+  let inlineDraftParams = $state<Record<string, unknown>>({});
   let isInlineDirty = $state(false);
+  let savingInline = $state(false);
 
   // 与母版完全共享的色彩系统
   const HASH_PALETTES = [
@@ -97,7 +98,7 @@
     };
   }
 
-  function safeParse(raw: string | undefined): Record<string, string | number | boolean> {
+  function safeParse(raw: string | undefined): Record<string, unknown> {
     if (!raw) return {};
     try {
       return JSON.parse(raw);
@@ -145,13 +146,8 @@
     if (!ws.activeProfile) return [];
     const nodeIds = new SvelteSet<string>();
     for (const item of ws.resolvedModuleBindings) {
-      const p = safeParse(item.module.params_json);
-      for (const val of Object.values(p)) {
-        const s = String(val);
-        if (s.startsWith('@node:')) {
-          const parts = s.replace('@node:', '').split('.');
-          if (parts.length > 0) nodeIds.add(parts[0]);
-        }
+      for (const m of (item.module.params_json || '').matchAll(/@node:([a-zA-Z0-9_-]+)\./g)) {
+        nodeIds.add(m[1]);
       }
     }
     return ws.devices.filter((d: Device) => nodeIds.has(d.id));
@@ -163,14 +159,20 @@
   });
 
   async function saveInlineParams(mod: Module) {
-    const latestMod = ws.modules.find((m: Module) => m.id === mod.id) || mod;
-    latestMod.params_json = JSON.stringify(inlineDraftParams);
-    await api.saveModule(latestMod);
-    await ws.loadModules();
-    await ws.loadProfiles();
-    isInlineDirty = false;
-    ws.showToast('积木 [' + mod.name + '] 实参已更新并重新编译 ✓', 'success');
-    if (ws.activeProfileId) ws.triggerCompile();
+    if (savingInline) return;
+    savingInline = true;
+    try {
+      const latestMod = ws.modules.find((m: Module) => m.id === mod.id) || mod;
+      latestMod.params_json = JSON.stringify(inlineDraftParams);
+      await api.saveModule(latestMod);
+      await ws.loadModules();
+      await ws.loadProfiles();
+      isInlineDirty = false;
+      ws.showToast('积木 [' + mod.name + '] 实参已更新并重新编译 ✓', 'success');
+      if (ws.activeProfileId) ws.triggerCompile();
+    } finally {
+      savingInline = false;
+    }
   }
 
   function cancelInlineParams(mod: Module) {
@@ -310,9 +312,10 @@
             <span>挑选装配</span>
           </button>
           <button
+            disabled={ws.isCompiling}
             onclick={() => ws.triggerCompile()}
             type="button"
-            class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap"
+            class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-blue-500 cursor-pointer transition flex items-center gap-1.5 whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Icon name="check" size={14} />
             <span>{ws.isCompiling ? '编译中...' : '编译保存'}</span>
@@ -443,11 +446,12 @@
                       </button>
                     {/if}
                     <button
+                      disabled={savingInline}
                       onclick={() => saveInlineParams(item.module)}
                       type="button"
-                      class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition whitespace-nowrap"
+                      class="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      应用实参
+                      {savingInline ? '应用中...' : '应用实参'}
                     </button>
                   </div>
                 </div>
@@ -469,7 +473,7 @@
                   {@const fieldName = fieldMap[cleanK] || fieldMap[k] || k}
                   <span class="rounded-lg bg-white dark:bg-zinc-950 px-2.5 py-1 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5 shadow-2xs truncate max-w-60">
                     <span class="text-blue-600 dark:text-blue-400 font-bold shrink-0">{fieldName}:</span>
-                    <strong class="text-zinc-900 dark:text-zinc-100 truncate">{String(val)}</strong>
+                    <strong class="text-zinc-900 dark:text-zinc-100 truncate">{typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val)}</strong>
                   </span>
                 {:else}
                   <span class="text-xs text-zinc-400 italic">该成品使用纯静态或环境默认值。</span>

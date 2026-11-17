@@ -556,6 +556,10 @@ func (s *Server) handleSaveComponent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if strings.TrimSpace(c.ID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "component id is required"})
+		return
+	}
 	if err := s.store.SaveComponent(r.Context(), c); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -598,6 +602,10 @@ func (s *Server) handleSaveModule(w http.ResponseWriter, r *http.Request) {
 	var m model.Module
 	if err := readJSON(r, &m); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(m.ID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "module id is required"})
 		return
 	}
 	if err := s.store.SaveModule(r.Context(), m); err != nil {
@@ -654,6 +662,10 @@ func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if strings.TrimSpace(p.ID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "profile id is required"})
+		return
+	}
 	if err := s.store.SaveProfile(r.Context(), p); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -696,6 +708,10 @@ func (s *Server) handleSaveDevice(w http.ResponseWriter, r *http.Request) {
 	var d model.Device
 	if err := readJSON(r, &d); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(d.ID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "device id is required"})
 		return
 	}
 	if err := s.store.SaveDevice(r.Context(), d); err != nil {
