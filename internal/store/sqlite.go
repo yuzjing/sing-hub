@@ -134,7 +134,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN service_name TEXT NOT NULL DEFAULT 'sing-box'")
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN last_remote_ver TEXT NOT NULL DEFAULT ''")
 
-	_ = s.migrateOldComponentsToModules(ctx)
+	// _ = s.migrateOldComponentsToModules(ctx)
 
 	return nil
 }
