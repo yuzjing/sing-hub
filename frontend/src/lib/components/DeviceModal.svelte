@@ -168,7 +168,7 @@
               <div class="flex items-center gap-2">
                 <input bind:value={prop.key} placeholder="标识(如 domain)" class="w-36 rounded border border-zinc-300 bg-white px-2 py-1 text-[11px] font-mono dark:border-zinc-700 dark:bg-zinc-950" />
                 <input bind:value={prop.label} placeholder="备注(如 Reality)" class="w-32 rounded border border-zinc-300 bg-white px-2 py-1 text-[11px] dark:border-zinc-700 dark:bg-zinc-950" />
-                <input bind:value={prop.value} placeholder="地址/域名" class="flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-[11px] font-mono dark:border-zinc-700 dark:bg-zinc-950" />
+                <input bind:value={prop.value} placeholder="值" class="flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-[11px] font-mono dark:border-zinc-700 dark:bg-zinc-950" />
                 <button onclick={() => removePropRow(idx)} type="button" class="p-1 text-zinc-400 hover:text-rose-500 cursor-pointer"><Icon name="close" size={13} /></button>
               </div>
             {/each}

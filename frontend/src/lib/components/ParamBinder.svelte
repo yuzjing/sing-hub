@@ -19,7 +19,7 @@
 
   let searchFilter = $state('');
   let activeMenuVar = $state<string | null>(null);
-  let menuPos = $state({ top: 0, right: 0 });
+  let menuStyle = $state('');
 
   let fieldMap = $derived.by(() => {
     const mapping: Record<string, string> = {};
@@ -42,7 +42,19 @@
     } else {
       activeMenuVar = varKey;
       const btn = (event.currentTarget as HTMLElement).getBoundingClientRect();
-      menuPos = { top: btn.bottom + 6, right: window.innerWidth - btn.right };
+      const right = Math.max(12, window.innerWidth - btn.right);
+      const spaceBelow = window.innerHeight - btn.bottom - 16;
+      const spaceAbove = btn.top - 16;
+
+      if (spaceBelow < 260 && spaceAbove > spaceBelow) {
+        const maxH = Math.min(416, Math.max(160, spaceAbove));
+        const bottom = window.innerHeight - btn.top + 6;
+        menuStyle = `bottom: ${bottom}px; right: ${right}px; max-height: ${maxH}px;`;
+      } else {
+        const maxH = Math.min(416, Math.max(160, spaceBelow));
+        const top = btn.bottom + 6;
+        menuStyle = `top: ${top}px; right: ${right}px; max-height: ${maxH}px;`;
+      }
     }
   }
 
@@ -138,7 +150,7 @@
   {@const targetVar = activeMenuVar}
   <button type="button" tabindex="-1" aria-label="关闭引用菜单" class="fixed inset-0 z-50 bg-transparent cursor-default border-none p-0 w-full h-full" onclick={() => activeMenuVar = null}></button>
 
-  <div style="top: {menuPos.top}px; right: {menuPos.right}px;" class="fixed z-50 w-80 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-zinc-700 dark:bg-zinc-900/95 text-sm space-y-3 animate-in fade-in zoom-in-95 duration-100 max-h-104 overflow-y-auto">
+  <div style={menuStyle} class="fixed z-50 w-80 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-zinc-700 dark:bg-zinc-900/95 text-sm space-y-3 animate-in fade-in zoom-in-95 duration-100 overflow-y-auto">
     <div>
       <span class="text-xs font-bold text-zinc-500 uppercase tracking-wider block px-1.5 mb-2 items-center gap-1.5">
         <Icon name="server" size={14} color="blue" />
