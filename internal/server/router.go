@@ -365,7 +365,7 @@ func (s *Server) handleDeployDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 更新数据库中该节点的最新远端版本记录
-	if result.RemoteVersion != "Unknown" && result.RemoteVersion != dev.LastRemoteVer {
+	if result.RemoteVersion != "" && result.RemoteVersion != "Unknown" && result.RemoteVersion != "待同步探测" && result.RemoteVersion != dev.LastRemoteVer {
 		dev.LastRemoteVer = result.RemoteVersion
 		_ = s.store.SaveDevice(r.Context(), *dev)
 	}

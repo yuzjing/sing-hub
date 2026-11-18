@@ -124,7 +124,7 @@ func PingAllNodes(devices []model.Device, timeout time.Duration) []NodePingRepor
 }
 
 // 抽取版本号正则，匹配如 "1.14.3" 或 "v1.15.0-alpha.12"
-var verRegex = regexp.MustCompile(`(?:sing-box\s+version\s+|v)?([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[a-zA-Z0-9.]+)?(?:-alpha\.[0-9]+)?)`)
+var verRegex = regexp.MustCompile(`(?i)sing-box\s+version\s+v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)`)
 
 func parseSingboxVersion(raw string) string {
 	lines := strings.Split(raw, "\n")
@@ -141,16 +141,113 @@ func parseSingboxVersion(raw string) string {
 	return ""
 }
 
+type strategyPlan struct {
+	verProbeCmd   string
+	checkCmd      string
+	reloadCmd     string
+	statusCmd     string
+	logCaptureCmd string
+}
+
+func buildStrategyPlan(strategy, svc, envPrefix, tempPath string) strategyPlan {
+	scDetect := fmt.Sprintf(
+		`SVC=%s; SC=""; `+
+			`if [ "$CURRENT_UID" -eq 0 ]; then `+
+			`if systemctl cat "$SVC.service" >/dev/null 2>&1; then SC="systemctl"; fi; `+
+			`elif systemctl --user cat "$SVC.service" >/dev/null 2>&1; then SC="systemctl --user"; `+
+			`elif systemctl cat "$SVC.service" >/dev/null 2>&1; then SC="sudo -n systemctl"; fi; `,
+		svc,
+	)
+	baseEnv := envPrefix + scDetect
+
+	// 仅原生 systemd / standalone 使用：优先 $PATH，找不到则向 systemd 询问 ExecStart 二进制路径
+	binDetect := `BIN=$(command -v sing-box 2>/dev/null); ` +
+		`if [ -z "$BIN" ] && [ -n "$SC" ]; then ` +
+		`CAND=$($SC show -p ExecStart --value "$SVC.service" 2>/dev/null | sed -n 's/.*path=\([^ ;]*\).*/\1/p' | head -n1); ` +
+		`case "$(basename "$CAND" 2>/dev/null)" in sing-box*) [ -x "$CAND" ] && BIN="$CAND" ;; esac; ` +
+		`fi; `
+
+	switch strategy {
+	case "podman":
+		return strategyPlan{
+			verProbeCmd: baseEnv + `podman exec "$SVC" sing-box version 2>/dev/null`,
+			checkCmd: baseEnv + fmt.Sprintf(
+				`if [ "$(podman inspect -f '{{.State.Running}}' "$SVC" 2>/dev/null)" = "true" ]; then `+
+					`podman exec -i "$SVC" sing-box check -c /dev/stdin < %s; `+
+					`else echo "[i] 容器当前未运行，跳过远端 exec 预检（已在控制面完成校验）"; fi`,
+				tempPath,
+			),
+			reloadCmd: baseEnv + `if [ -n "$SC" ]; then $SC reset-failed "$SVC" 2>/dev/null; $SC restart "$SVC"; else podman restart "$SVC"; fi`,
+			statusCmd: baseEnv + `if [ -n "$SC" ]; then $SC is-active --quiet "$SVC"; else [ "$(podman inspect -f '{{.State.Running}}' "$SVC" 2>/dev/null)" = "true" ]; fi`,
+			logCaptureCmd: baseEnv + `if [ "$SC" = "systemctl --user" ]; then journalctl --user -u "$SVC" -n 25 --no-pager 2>&1; ` +
+				`elif [ -n "$SC" ]; then journalctl -u "$SVC" -n 25 --no-pager 2>&1 || $SC status "$SVC" --no-pager -l 2>&1; ` +
+				`else podman logs --tail 25 "$SVC" 2>&1; fi`,
+		}
+
+	case "docker":
+		return strategyPlan{
+			verProbeCmd: baseEnv + `docker exec "$SVC" sing-box version 2>/dev/null`,
+			checkCmd: baseEnv + fmt.Sprintf(
+				`if [ "$(docker inspect -f '{{.State.Running}}' "$SVC" 2>/dev/null)" = "true" ]; then `+
+					`docker exec -i "$SVC" sing-box check -c /dev/stdin < %s; `+
+					`else echo "[i] 容器当前未运行，跳过远端 exec 预检（已在控制面完成校验）"; fi`,
+				tempPath,
+			),
+			reloadCmd:     baseEnv + `if [ -n "$SC" ]; then $SC reset-failed "$SVC" 2>/dev/null; $SC restart "$SVC"; else docker restart "$SVC"; fi`,
+			statusCmd:     baseEnv + `if [ -n "$SC" ]; then $SC is-active --quiet "$SVC"; else [ "$(docker inspect -f '{{.State.Running}}' "$SVC" 2>/dev/null)" = "true" ]; fi`,
+			logCaptureCmd: baseEnv + `if [ -n "$SC" ]; then journalctl -u "$SVC" -n 25 --no-pager 2>&1; else docker logs --tail 25 "$SVC" 2>&1; fi`,
+		}
+
+	case "standalone":
+		return strategyPlan{
+			verProbeCmd:   baseEnv + binDetect + `[ -n "$BIN" ] && "$BIN" version 2>/dev/null`,
+			checkCmd:      baseEnv + binDetect + fmt.Sprintf(`if [ -z "$BIN" ]; then echo "未找到 sing-box 可执行文件" >&2; exit 1; fi; "$BIN" check -c %s`, tempPath),
+			reloadCmd:     `echo "已替换配置文件 (standalone 模式不重启守护进程)"`,
+			statusCmd:     `true`,
+			logCaptureCmd: `true`,
+		}
+
+	default: // systemd：100% 原生 Systemd 主导生命周期，通过 ExecStart 精确识别底层执行器
+		execDetect := `if [ -z "$SC" ]; then echo "未找到 systemd 服务单元: $SVC.service" >&2; exit 1; fi; ` +
+			`EXEC_LINE=$($SC show -p ExecStart --value "$SVC.service" 2>/dev/null); ` +
+			`EXEC_BIN=$(printf '%s' "$EXEC_LINE" | sed -n 's/.*path=\([^ ;]*\).*/\1/p' | head -n1); ` +
+			`CNAME=$(printf '%s' "$EXEC_LINE" | sed -n 's/.*--name[= ]\([^ ;]*\).*/\1/p' | head -n1); ` +
+			`[ -n "$CNAME" ] || CNAME="$SVC"; `
+
+		return strategyPlan{
+			verProbeCmd: baseEnv + execDetect +
+				`case "$(basename "$EXEC_BIN" 2>/dev/null)" in ` +
+				`sing-box*) "$EXEC_BIN" version 2>/dev/null ;; ` +
+				`podman) podman exec "$CNAME" sing-box version 2>/dev/null ;; ` +
+				`docker) docker exec "$CNAME" sing-box version 2>/dev/null ;; ` +
+				`esac`,
+			checkCmd: baseEnv + execDetect + fmt.Sprintf(
+				`case "$(basename "$EXEC_BIN" 2>/dev/null)" in `+
+					`sing-box*) "$EXEC_BIN" check -c %s ;; `+
+					`podman) if [ "$(podman inspect -f '{{.State.Running}}' "$CNAME" 2>/dev/null)" = "true" ]; then podman exec -i "$CNAME" sing-box check -c /dev/stdin < %s; else echo "[i] Quadlet/Podman 容器未运行，跳过远端 exec 预检"; fi ;; `+
+					`docker) if [ "$(docker inspect -f '{{.State.Running}}' "$CNAME" 2>/dev/null)" = "true" ]; then docker exec -i "$CNAME" sing-box check -c /dev/stdin < %s; else echo "[i] Docker 容器未运行，跳过远端 exec 预检"; fi ;; `+
+					`*) echo "[i] 非标准 ExecStart ($EXEC_BIN)，跳过远端预检" ;; `+
+					`esac`,
+				tempPath, tempPath, tempPath,
+			),
+			reloadCmd: baseEnv + `if [ -z "$SC" ]; then echo "未找到 systemd 服务单元: $SVC.service" >&2; exit 1; fi; $SC reset-failed "$SVC" 2>/dev/null; $SC restart "$SVC"`,
+			statusCmd: baseEnv + `[ -n "$SC" ] && $SC is-active --quiet "$SVC"`,
+			logCaptureCmd: baseEnv + `if [ "$SC" = "systemctl --user" ]; then journalctl --user -u "$SVC" -n 25 --no-pager 2>&1; ` +
+				`else journalctl -u "$SVC" -n 25 --no-pager 2>&1 || $SC status "$SVC" --no-pager -l 2>&1; fi`,
+		}
+	}
+}
+
 func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (DeployResult, error) {
 	var res DeployResult
 	var logs strings.Builder
 
 	logStep := func(step string) {
-		logs.WriteString(fmt.Sprintf("\n[+] %s\n", step))
+		fmt.Fprintf(&logs, "\n[+] %s\n", step)
 	}
 	logOut := func(out string) {
 		if strings.TrimSpace(out) != "" {
-			logs.WriteString(fmt.Sprintf("%s\n", strings.TrimSpace(out)))
+			fmt.Fprintf(&logs, "%s\n", strings.TrimSpace(out))
 		}
 	}
 
@@ -198,7 +295,7 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 
 	client, err := ssh.Dial("tcp", addr, clientConfig)
 	if err != nil {
-		logs.WriteString(fmt.Sprintf("SSH 认证或网络握手失败: %v\n", err))
+		fmt.Fprintf(&logs, "SSH 认证或网络握手失败: %v\n", err)
 		res.Logs = logs.String()
 		return res, fmt.Errorf("SSH 连接失败: %w", err)
 	}
@@ -224,27 +321,15 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 		"  export DBUS_SESSION_BUS_ADDRESS=\"unix:path=$XDG_RUNTIME_DIR/bus\"; " +
 		"fi; "
 
-	// 1. 智能探测远端运行环境与 Sing-box 内核版本
-	logStep("阶段 1: 探测远端运行环境与内核版本...")
-	var verProbeCmd string
-	switch d.DeployStrategy {
-	case "podman":
-		// 优先 exec，若容器刚创建则从 logs 或镜像 inspect 尝试
-		verProbeCmd = fmt.Sprintf("%s podman exec %s sing-box version 2>/dev/null || podman logs --tail 50 %s 2>/dev/null", envPrefix, svc, svc)
-	case "docker":
-		verProbeCmd = fmt.Sprintf("%s docker exec %s sing-box version 2>/dev/null || docker logs --tail 50 %s 2>/dev/null", envPrefix, svc, svc)
-	case "standalone":
-		verProbeCmd = fmt.Sprintf("%s sing-box version 2>/dev/null || ~/.local/bin/sing-box version 2>/dev/null || /usr/local/bin/sing-box version 2>/dev/null", envPrefix)
-	default: // systemd (兼容原生二进制与 Quadlet 容器化)
-		verProbeCmd = fmt.Sprintf("%s (sing-box version 2>/dev/null || podman exec %s sing-box version 2>/dev/null || docker exec %s sing-box version 2>/dev/null || journalctl --user -u %s -n 50 2>/dev/null)", envPrefix, svc, svc, svc)
-	}
+	plan := buildStrategyPlan(d.DeployStrategy, svc, envPrefix, tempPath)
 
+	// 1. 探测远端运行环境与 Sing-box 内核版本
+	logStep("阶段 1: 探测远端运行环境与内核版本...")
 	sessV, _ := client.NewSession()
-	vOut, _ := sessV.CombinedOutput(verProbeCmd)
+	vOut, _ := sessV.CombinedOutput(plan.verProbeCmd)
 	sessV.Close()
 
-	detectedVer := parseSingboxVersion(string(vOut))
-	if detectedVer != "" {
+	if detectedVer := parseSingboxVersion(string(vOut)); detectedVer != "" {
 		res.RemoteVersion = detectedVer
 		logOut(fmt.Sprintf("探测到活跃内核版本: %s", res.RemoteVersion))
 	} else {
@@ -252,7 +337,7 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 		logOut("提示: 当前未能获取确切版本号（服务可能处于停止状态），将在重载后再次核验。")
 	}
 
-	// 2. 写入临时配置文件（通过 Stdin 管道直传，确保与本地字节及 SHA256 绝对一致）
+	// 2. 写入临时配置文件（Stdin 管道直传，确保 SHA256 字节 1:1 一致）
 	logStep("阶段 2: 安全分发临时配置至目标主机...")
 	sess1, _ := client.NewSession()
 	sess1.Stdin = bytes.NewReader(configJSON)
@@ -267,22 +352,10 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 	}
 	logOut("临时配置文件已持久化落盘。")
 
-	// 3. 内核预检：运用 /dev/stdin 管道，无视容器内部挂载目录差异
+	// 3. 内核预检
 	logStep("阶段 3: 执行内核深度语义预检 (Pre-flight Checking)...")
-	var checkCmd string
-	switch d.DeployStrategy {
-	case "podman":
-		checkCmd = fmt.Sprintf("%s podman exec -i %s sing-box check -c /dev/stdin < %s", envPrefix, svc, tempPath)
-	case "docker":
-		checkCmd = fmt.Sprintf("%s docker exec -i %s sing-box check -c /dev/stdin < %s", envPrefix, svc, tempPath)
-	case "standalone":
-		checkCmd = fmt.Sprintf("%s sing-box check -c %s", envPrefix, tempPath)
-	default: // systemd (若宿主机有二进制用宿主机，没有则借用容器/Quadlet)
-		checkCmd = fmt.Sprintf("%s if command -v sing-box >/dev/null 2>&1; then sing-box check -c %s; else podman exec -i %s sing-box check -c /dev/stdin < %s; fi", envPrefix, tempPath, svc, tempPath)
-	}
-
 	sess2, _ := client.NewSession()
-	out2, err := sess2.CombinedOutput(checkCmd)
+	out2, err := sess2.CombinedOutput(plan.checkCmd)
 	sess2.Close()
 	if err != nil {
 		logOut(string(out2))
@@ -293,28 +366,15 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 		cleanSess.Close()
 		return res, fmt.Errorf("远端预检失败: 配置未通过官方语法校验")
 	}
+	if strings.TrimSpace(string(out2)) != "" {
+		logOut(string(out2))
+	}
 	logOut("Sing-box 语法与语义校验 100% 通过 ✓")
 
 	// 4. 原子覆写并触发重载
 	logStep("阶段 4: 原子覆写正式配置并启动/重载守护进程...")
-	var reloadCmd, statusCmd string
-	switch d.DeployStrategy {
-	case "podman":
-		reloadCmd = fmt.Sprintf("%s (systemctl --user restart %s 2>/dev/null || podman restart %s)", envPrefix, svc, svc)
-		statusCmd = fmt.Sprintf(`%s (systemctl --user is-active --quiet %s 2>/dev/null || [ "$(podman inspect -f '{{.State.Running}}' %s 2>/dev/null)" = "true" ])`, envPrefix, svc, svc)
-	case "docker":
-		reloadCmd = fmt.Sprintf("%s docker restart %s", envPrefix, svc)
-		statusCmd = fmt.Sprintf(`%s [ "$(docker inspect -f '{{.State.Running}}' %s 2>/dev/null)" = "true" ]`, envPrefix, svc)
-	case "standalone":
-		reloadCmd = "echo '已替换配置文件 (无守护进程策略)'"
-		statusCmd = "true"
-	default: // systemd
-		reloadCmd = fmt.Sprintf("%s (systemctl --user restart %s 2>/dev/null || systemctl restart %s 2>/dev/null || sudo systemctl restart %s 2>&1)", envPrefix, svc, svc, svc)
-		statusCmd = fmt.Sprintf("%s (systemctl --user is-active --quiet %s 2>/dev/null || systemctl is-active --quiet %s 2>/dev/null)", envPrefix, svc, svc)
-	}
-
 	sess3, _ := client.NewSession()
-	swapCmd := fmt.Sprintf("%s mv -f %s %s && %s", envPrefix, tempPath, remotePath, reloadCmd)
+	swapCmd := fmt.Sprintf("%s mv -f %s %s && (%s)", envPrefix, tempPath, remotePath, plan.reloadCmd)
 	out3, err := sess3.CombinedOutput(swapCmd)
 	sess3.Close()
 	if err != nil {
@@ -324,36 +384,25 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 	}
 	logOut("配置替换完成，已触发服务优雅重载。")
 
-	// 5. 存活探针与故障日志捕获
+	// 5. 存活探针、故障日志捕获与真实版本二次核验
 	logStep("阶段 5: 验证服务存活状态 (Health Check)...")
-	time.Sleep(1200 * time.Millisecond) // 等待 systemd/podman 容器拉起
+	time.Sleep(1200 * time.Millisecond)
 
 	sessStatus, _ := client.NewSession()
-	_, statusErr := sessStatus.CombinedOutput(statusCmd)
+	_, statusErr := sessStatus.CombinedOutput(plan.statusCmd)
 	sessStatus.Close()
 
 	serviceHealthy := statusErr == nil
 	if !serviceHealthy {
 		logOut("⚠️ 警告: 服务重载后未能处于 Active/Running 状态，正在抓取错误日志现场...")
 		sessLog, _ := client.NewSession()
-		var logCaptureCmd string
-		if d.DeployStrategy == "docker" {
-			logCaptureCmd = fmt.Sprintf("%s docker logs --tail 25 %s 2>&1", envPrefix, svc)
-		} else {
-			// 智能拉取 systemd 用户态 journal 或 podman logs
-			logCaptureCmd = fmt.Sprintf("%s (journalctl --user -u %s -n 25 --no-pager 2>/dev/null || journalctl -u %s -n 25 --no-pager 2>/dev/null || podman logs --tail 25 %s 2>&1)", envPrefix, svc, svc, svc)
-		}
-		journalOut, _ := sessLog.CombinedOutput(logCaptureCmd)
+		journalOut, _ := sessLog.CombinedOutput(plan.logCaptureCmd)
 		sessLog.Close()
 		logOut(string(journalOut))
 	} else {
 		logOut("守护进程运行状态健康 (Active/Running) ✓")
-	}
-
-	// 再次探测一次版本（若初次未成功抓取到，保留原逻辑）
-	if res.RemoteVersion == "待同步探测" {
 		sessV2, _ := client.NewSession()
-		vOut2, _ := sessV2.CombinedOutput(verProbeCmd)
+		vOut2, _ := sessV2.CombinedOutput(plan.verProbeCmd)
 		sessV2.Close()
 		if finalVer := parseSingboxVersion(string(vOut2)); finalVer != "" {
 			res.RemoteVersion = finalVer
@@ -373,7 +422,7 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 		logOut(fmt.Sprintf("校验和完美匹配: %s", remoteSHA[:8]))
 		res.VerifiedHash = remoteSHA[:8]
 	} else {
-		logOut("警告: 远端物理文件 SHA256 与本地编译快照存在细微出入")
+		logOut("警告: 远端物理文件 SHA256 与本地编译快照存在出入")
 		res.Logs = logs.String()
 		return res, fmt.Errorf("远端配置校验和不匹配")
 	}

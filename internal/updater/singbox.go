@@ -27,7 +27,7 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-var verExtractRegex = regexp.MustCompile(`([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[a-zA-Z0-9.]+)?(?:-alpha\.[0-9]+)?)`)
+var verExtractRegex = regexp.MustCompile(`(?i)sing-box\s+version\s+v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)`)
 
 type Updater struct {
 	store     *store.Store
