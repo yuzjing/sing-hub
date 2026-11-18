@@ -50,6 +50,21 @@
     );
   });
 
+  let filteredDeviceIds = $derived.by(() => filteredDevices.map((d: Device) => d.id));
+  let allDevicesSelected = $derived.by(() => filteredDeviceIds.length > 0 && filteredDeviceIds.every((id: string) => selectedDeviceIds.includes(id)));
+  let someDevicesSelected = $derived.by(() => !allDevicesSelected && filteredDeviceIds.some((id: string) => selectedDeviceIds.includes(id)));
+
+  function toggleSelectAllDevices() {
+    if (allDevicesSelected) {
+      const removeSet = new Set(filteredDeviceIds);
+      selectedDeviceIds = selectedDeviceIds.filter((id: string) => !removeSet.has(id));
+    } else {
+      const next = new Set(selectedDeviceIds);
+      filteredDeviceIds.forEach((id: string) => next.add(id));
+      selectedDeviceIds = Array.from(next);
+    }
+  }
+
   function toggleExpandProps(devId: string) {
     if (expandedPropDevIds.includes(devId)) {
       expandedPropDevIds = expandedPropDevIds.filter((id: string) => id !== devId);
@@ -129,6 +144,19 @@
     </div>
 
     <div class="flex items-center gap-4">
+      {#if isDeviceManageMode}
+        <label class="flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={allDevicesSelected}
+            indeterminate={someDevicesSelected}
+            disabled={filteredDeviceIds.length === 0}
+            onchange={toggleSelectAllDevices}
+            class="rounded h-3.5 w-3.5 cursor-pointer"
+          />
+          <span>全选筛选 ({filteredDeviceIds.length})</span>
+        </label>
+      {/if}
       <div class="w-64">
         <TagFilter {availableTags} bind:selectedTags={selectedFilterTags} borderless={true} />
       </div>

@@ -58,6 +58,25 @@
     return counts;
   });
   let availableTags = $derived.by(() => Object.keys(tagCounts));
+  let filteredProfileIds = $derived.by(() => {
+    return ws.profiles
+      .filter((p: Profile) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (p.tags || []).includes(t)))
+      .map((p: Profile) => p.id);
+  });
+
+  let allProfilesSelected = $derived.by(() => filteredProfileIds.length > 0 && filteredProfileIds.every((id: string) => selectedProfileIds.includes(id)));
+  let someProfilesSelected = $derived.by(() => !allProfilesSelected && filteredProfileIds.some((id: string) => selectedProfileIds.includes(id)));
+
+  function toggleSelectAllProfiles() {
+    if (allProfilesSelected) {
+      const removeSet = new Set(filteredProfileIds);
+      selectedProfileIds = selectedProfileIds.filter((id: string) => !removeSet.has(id));
+    } else {
+      const next = new Set(selectedProfileIds);
+      filteredProfileIds.forEach((id: string) => next.add(id));
+      selectedProfileIds = Array.from(next);
+    }
+  }
 
   let expandedModuleId = $state<string | null>(null);
   let inlineDraftParams = $state<Record<string, unknown>>({});
@@ -227,7 +246,29 @@
       </div>
     </div>
 
+    
     <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} />
+
+    {#if isProfileManageMode}
+      <div class="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-amber-50/70 dark:bg-amber-950/20 px-4 py-2 text-xs">
+        <label class="flex items-center gap-2 cursor-pointer font-semibold text-amber-800 dark:text-amber-300 select-none">
+          <input
+            type="checkbox"
+            checked={allProfilesSelected}
+            indeterminate={someProfilesSelected}
+            disabled={filteredProfileIds.length === 0}
+            onchange={toggleSelectAllProfiles}
+            class="rounded h-3.5 w-3.5 cursor-pointer"
+          />
+          <span>全选筛选 ({filteredProfileIds.length})</span>
+        </label>
+        {#if selectedProfileIds.length > 0}
+          <button onclick={() => selectedProfileIds = []} type="button" class="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer">
+            清空 ({selectedProfileIds.length})
+          </button>
+        {/if}
+      </div>
+    {/if}
 
     <div class="flex-1 overflow-y-auto p-3 space-y-2">
       {#each ws.profiles.filter((p: Profile) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (p.tags || []).includes(t))) as p (p.id)}

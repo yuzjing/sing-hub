@@ -88,6 +88,30 @@
   }
 
   let detectedVars = $derived.by(() => extractAllVars(studioTmplCode));
+  let allFilteredCompIds = $derived.by(() => {
+    return ws.components
+      .filter((c: Component) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (c.scope_tag || '').includes(t)))
+      .map((c: Component) => c.id);
+  });
+
+  function isAllSelected(ids: string[]): boolean {
+    return ids.length > 0 && ids.every((id: string) => selectedCompIds.includes(id));
+  }
+
+  function isSomeSelected(ids: string[]): boolean {
+    return !isAllSelected(ids) && ids.some((id: string) => selectedCompIds.includes(id));
+  }
+
+  function toggleSelectIds(ids: string[]) {
+    if (isAllSelected(ids)) {
+      const removeSet = new Set(ids);
+      selectedCompIds = selectedCompIds.filter((id: string) => !removeSet.has(id));
+    } else {
+      const next = new Set(selectedCompIds);
+      ids.forEach((id: string) => next.add(id));
+      selectedCompIds = Array.from(next);
+    }
+  }
 
   const HASH_PALETTES = [
     { bg: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/25 dark:text-emerald-300 dark:border-emerald-500/30', dot: 'bg-emerald-500' },
@@ -238,30 +262,64 @@
     <!-- 标签多选筛选 -->
     <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} />
 
+    {#if isCompManageMode}
+      <div class="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-amber-50/70 dark:bg-amber-950/20 px-4 py-2 text-xs">
+        <label class="flex items-center gap-2 cursor-pointer font-semibold text-amber-800 dark:text-amber-300 select-none">
+          <input
+            type="checkbox"
+            checked={isAllSelected(allFilteredCompIds)}
+            indeterminate={isSomeSelected(allFilteredCompIds)}
+            disabled={allFilteredCompIds.length === 0}
+            onchange={() => toggleSelectIds(allFilteredCompIds)}
+            class="rounded h-3.5 w-3.5 cursor-pointer"
+          />
+          <span>全选筛选 ({allFilteredCompIds.length})</span>
+        </label>
+        {#if selectedCompIds.length > 0}
+          <button onclick={() => selectedCompIds = []} type="button" class="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer">
+            清空 ({selectedCompIds.length})
+          </button>
+        {/if}
+      </div>
+    {/if}
+
     <!-- 现代手风琴卡片分组 -->
     <div class="flex-1 overflow-y-auto p-3 space-y-4">
       {#each CATEGORIES as cat (cat.key)}
         {@const filteredComps = ws.components.filter((c: Component) => c.category === cat.key && (selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (c.scope_tag || '').includes(t))))}
         {@const isCollapsed = collapsedCategories[cat.key] === true}
         {@const subGroups = groupComponentsByMount(filteredComps)}
+        {@const catIds = filteredComps.map((c: Component) => c.id)}
         
         <div class="rounded-xl border border-zinc-200/70 bg-zinc-100/60 p-1.5 dark:border-zinc-800/80 dark:bg-zinc-900/50">
-          <button
-            onclick={() => toggleCategory(cat.key)}
-            type="button"
-            class="w-full flex items-center justify-between px-2.5 py-2 rounded-lg hover:bg-zinc-200/50 dark:hover:bg-zinc-800/60 transition cursor-pointer select-none text-left"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-zinc-400 text-[10px] transform transition-transform duration-200 {isCollapsed ? '' : 'rotate-90'}">▶</span>
-              <Icon name={cat.icon} size={14} color={cat.color} />
-              <span class="text-xs font-bold text-zinc-800 dark:text-zinc-200">{cat.title}</span>
-            </div>
-            
-            <!-- 一级总数微拟态徽标：>0 清晰显眼，=0 优雅淡化 -->
-            <span class="inline-flex min-w-5 h-5 items-center justify-center text-[11px] font-mono font-bold px-1.5 rounded-full border shadow-2xs transition-all {filteredComps.length > 0 ? 'bg-zinc-200/90 border-zinc-300/80 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200' : 'bg-transparent border-transparent text-zinc-400 opacity-40'}">
-              {filteredComps.length}
-            </span>
-          </button>
+          
+          <div class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-zinc-200/50 dark:hover:bg-zinc-800/60 transition">
+            {#if isCompManageMode && catIds.length > 0}
+              <input
+                type="checkbox"
+                title={`全选 ${cat.title}`}
+                checked={isAllSelected(catIds)}
+                indeterminate={isSomeSelected(catIds)}
+                onchange={() => toggleSelectIds(catIds)}
+                class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
+              />
+            {/if}
+            <button
+              onclick={() => toggleCategory(cat.key)}
+              type="button"
+              class="flex-1 flex items-center justify-between cursor-pointer select-none text-left py-0.5"
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-zinc-400 text-xs transform transition-transform duration-200 {isCollapsed ? '' : 'rotate-90'}">▶</span>
+                <Icon name={cat.icon} size={14} color={cat.color} />
+                <span class="text-xs font-bold text-zinc-800 dark:text-zinc-200">{cat.title}</span>
+              </div>
+
+              <span class="inline-flex min-w-5 h-5 items-center justify-center text-xs font-mono font-bold px-1.5 rounded-full border shadow-2xs transition-all {filteredComps.length > 0 ? 'bg-zinc-200/90 border-zinc-300/80 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200' : 'bg-transparent border-transparent text-zinc-400 opacity-40'}">
+                {filteredComps.length}
+              </span>
+            </button>
+          </div>
 
           {#if !isCollapsed}
             <div class="mt-1 flex flex-col gap-2.5 px-1 pb-1 animate-in fade-in duration-150">
