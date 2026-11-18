@@ -2,6 +2,7 @@
 package remote
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"net"
@@ -251,10 +252,11 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 		logOut("提示: 当前未能获取确切版本号（服务可能处于停止状态），将在重载后再次核验。")
 	}
 
-	// 2. 写入临时配置文件
+	// 2. 写入临时配置文件（通过 Stdin 管道直传，确保与本地字节及 SHA256 绝对一致）
 	logStep("阶段 2: 安全分发临时配置至目标主机...")
 	sess1, _ := client.NewSession()
-	writeCmd := fmt.Sprintf("%s mkdir -p $(dirname %s) && cat << 'EOF' > %s\n%s\nEOF", envPrefix, tempPath, tempPath, string(configJSON))
+	sess1.Stdin = bytes.NewReader(configJSON)
+	writeCmd := fmt.Sprintf("%s mkdir -p $(dirname %s) && cat > %s", envPrefix, tempPath, tempPath)
 	out1, err := sess1.CombinedOutput(writeCmd)
 	sess1.Close()
 	if err != nil {
