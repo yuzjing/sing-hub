@@ -1,6 +1,7 @@
 <!-- frontend/src/lib/components/MountDrawer.svelte -->
 <script lang="ts">
   import { ws } from '$lib/workspace.svelte';
+  import { api } from '$lib/api';
   import type { Module } from '$lib/types';
   import Icon from '$lib/components/Icon.svelte';
 
@@ -15,9 +16,9 @@
   let selectedCategory = $state('all');
   let selectedTags = $state<string[]>([]);
   let tagMode = $state<'and' | 'or'>('and');
-  let onlyUnmounted = $state(false);
-  let mountingId = $state('');
-  let isBatchMounting = $state(false);
+  let mountFilter = $state<'all' | 'unmounted' | 'mounted'>('all');
+  let workingId = $state('');
+  let isBatchWorking = $state(false);
 
   const CATEGORIES = [
     { key: 'all', title: '全部' },
@@ -51,13 +52,17 @@
           ? selectedTags.every((t: string) => modTags.includes(t))
           : selectedTags.some((t: string) => modTags.includes(t))
       );
-      const matchMounted = !onlyUnmounted || !mountedModuleIds.has(m.id);
+      const isMounted = mountedModuleIds.has(m.id);
+      const matchMount =
+        mountFilter === 'all' ||
+        (mountFilter === 'unmounted' && !isMounted) ||
+        (mountFilter === 'mounted' && isMounted);
       const matchText = !q ||
         m.name.toLowerCase().includes(q) ||
         m.id.toLowerCase().includes(q) ||
         (m.template?.mount_path || '').toLowerCase().includes(q) ||
         modTags.some((t: string) => t.toLowerCase().includes(q));
-      return matchCat && matchTags && matchMounted && matchText;
+      return matchCat && matchTags && matchMount && matchText;
     });
   });
 
@@ -65,6 +70,23 @@
     return filteredModules
       .filter((m: Module) => !mountedModuleIds.has(m.id))
       .map((m: Module) => m.id);
+  });
+
+  let mountedFilteredIds = $derived.by(() => {
+    return filteredModules
+      .filter((m: Module) => mountedModuleIds.has(m.id))
+      .map((m: Module) => m.id);
+  });
+
+  // 防误触：在“已装配”视图或带有任何筛选条件时，才允许显示“一键卸载”
+  let canBatchDetach = $derived.by(() => {
+    if (mountedFilteredIds.length === 0) return false;
+    return (
+      mountFilter === 'mounted' ||
+      selectedCategory !== 'all' ||
+      selectedTags.length > 0 ||
+      searchText.trim() !== ''
+    );
   });
 
   function toggleTag(tag: string) {
@@ -75,26 +97,62 @@
     }
   }
 
+  async function detachModuleIds(ids: string[]) {
+    const profile = ws.activeProfile;
+    if (!profile || ids.length === 0) return;
+    const removeSet = new Set(ids);
+    const remaining = (profile.modules || [])
+      .filter((b: { module_id: string }) => !removeSet.has(b.module_id))
+      .map((b, idx) => ({ ...b, order_index: idx + 1 }));
+
+    await api.saveProfile({ ...profile, modules: remaining });
+    await ws.loadProfiles();
+    ws.selectProfile(profile.id);
+  }
+
   async function handleMount(m: Module) {
-    if (mountingId || isBatchMounting || mountedModuleIds.has(m.id)) return;
-    mountingId = m.id;
+    if (workingId || isBatchWorking || mountedModuleIds.has(m.id)) return;
+    workingId = m.id;
     try {
       await ws.attachModules([m.id]);
       ws.showToast('已装配成品积木 [' + m.name + '] ✓', 'success');
     } finally {
-      mountingId = '';
+      workingId = '';
+    }
+  }
+
+  async function handleDetach(m: Module) {
+    if (workingId || isBatchWorking || !mountedModuleIds.has(m.id)) return;
+    workingId = m.id;
+    try {
+      await detachModuleIds([m.id]);
+      ws.showToast('已卸载积木 [' + m.name + ']', 'info');
+    } finally {
+      workingId = '';
     }
   }
 
   async function handleBatchMount() {
-    if (isBatchMounting || unmountedFilteredIds.length === 0) return;
-    isBatchMounting = true;
+    if (isBatchWorking || workingId || unmountedFilteredIds.length === 0) return;
+    isBatchWorking = true;
     try {
       const count = unmountedFilteredIds.length;
       await ws.attachModules(unmountedFilteredIds);
       ws.showToast(`已批量装配 ${count} 个积木 ✓`, 'success');
     } finally {
-      isBatchMounting = false;
+      isBatchWorking = false;
+    }
+  }
+
+  async function handleBatchDetach() {
+    if (isBatchWorking || workingId || mountedFilteredIds.length === 0) return;
+    isBatchWorking = true;
+    try {
+      const count = mountedFilteredIds.length;
+      await detachModuleIds(mountedFilteredIds);
+      ws.showToast(`已批量卸载 ${count} 个积木`, 'info');
+    } finally {
+      isBatchWorking = false;
     }
   }
 </script>
@@ -171,22 +229,55 @@
           </div>
         {/if}
 
-        <div class="flex items-center justify-between text-xs">
-          <label class="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400 cursor-pointer select-none">
-            <input type="checkbox" bind:checked={onlyUnmounted} class="rounded cursor-pointer" />
-            <span>仅显示未装配 ({unmountedFilteredIds.length})</span>
-          </label>
-
-          {#if unmountedFilteredIds.length > 0}
+        <!-- 三态装配状态筛选 + 批量装配/卸载 -->
+        <div class="flex items-center justify-between gap-2 text-xs">
+          <div class="inline-flex rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 p-0.5">
             <button
-              disabled={isBatchMounting}
-              onclick={handleBatchMount}
+              onclick={() => mountFilter = 'all'}
               type="button"
-              class="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500 cursor-pointer shadow-xs transition disabled:opacity-60"
+              class="px-2 py-0.5 rounded-md transition cursor-pointer {mountFilter === 'all' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white font-bold shadow-2xs' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}"
             >
-              {isBatchMounting ? '装配中...' : `一键装配筛选 (${unmountedFilteredIds.length})`}
+              全部
             </button>
-          {/if}
+            <button
+              onclick={() => mountFilter = 'unmounted'}
+              type="button"
+              class="px-2 py-0.5 rounded-md transition cursor-pointer {mountFilter === 'unmounted' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white font-bold shadow-2xs' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}"
+            >
+              未装配
+            </button>
+            <button
+              onclick={() => mountFilter = 'mounted'}
+              type="button"
+              class="px-2 py-0.5 rounded-md transition cursor-pointer {mountFilter === 'mounted' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white font-bold shadow-2xs' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}"
+            >
+              已装配
+            </button>
+          </div>
+
+          <div class="flex items-center gap-1.5">
+            {#if unmountedFilteredIds.length > 0}
+              <button
+                disabled={isBatchWorking || !!workingId}
+                onclick={handleBatchMount}
+                type="button"
+                class="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-500 cursor-pointer shadow-xs transition disabled:opacity-60"
+              >
+                {isBatchWorking ? '处理中...' : `一键装配 (${unmountedFilteredIds.length})`}
+              </button>
+            {/if}
+
+            {#if canBatchDetach}
+              <button
+                disabled={isBatchWorking || !!workingId}
+                onclick={handleBatchDetach}
+                type="button"
+                class="rounded-lg border border-rose-500/50 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 cursor-pointer transition disabled:opacity-60"
+              >
+                {isBatchWorking ? '处理中...' : `一键卸载 (${mountedFilteredIds.length})`}
+              </button>
+            {/if}
+          </div>
         </div>
       </div>
 
@@ -213,18 +304,24 @@
               </div>
 
               {#if isMounted}
-                <span class="px-2.5 py-1 text-xs text-zinc-400 font-medium bg-zinc-100 dark:bg-zinc-800 rounded-lg shrink-0">
-                  已在方案中 ✓
-                </span>
+                <button
+                  disabled={workingId === mod.id || isBatchWorking}
+                  onclick={() => handleDetach(mod)}
+                  type="button"
+                  class="rounded-lg border border-rose-300 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 px-3 py-1 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/70 cursor-pointer transition flex items-center gap-1 shrink-0 disabled:opacity-60"
+                >
+                  <Icon name="close" size={12} />
+                  <span>{workingId === mod.id ? '卸载中...' : '卸载'}</span>
+                </button>
               {:else}
                 <button
-                  disabled={mountingId === mod.id || isBatchMounting}
+                  disabled={workingId === mod.id || isBatchWorking}
                   onclick={() => handleMount(mod)}
                   type="button"
                   class="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition flex items-center gap-1 shrink-0 disabled:opacity-60"
                 >
                   <Icon name="plus" size={13} />
-                  <span>{mountingId === mod.id ? '装配中...' : '装配'}</span>
+                  <span>{workingId === mod.id ? '装配中...' : '装配'}</span>
                 </button>
               {/if}
             </div>
