@@ -12,7 +12,9 @@
   let { open = false, onClose = () => {} }: Props = $props();
 
   let isSavingSettings = $state(false);
+  let isPushingGit = $state(false);
   let linterEnabled = $state(true);
+  let gitUseProxy = $state(false);
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
   function stopPolling() {
@@ -25,6 +27,7 @@
   $effect(() => {
     if (open) {
       linterEnabled = ws.systemSettings.singbox_linter_enabled !== 'false';
+      gitUseProxy = ws.systemSettings.git_use_proxy === 'true';
       if (!ws.systemSettings.singbox_update_channel) ws.systemSettings.singbox_update_channel = 'all';
       ws.fetchUpdaterStatus();
     } else {
@@ -59,6 +62,7 @@
     isSavingSettings = true;
     try {
       ws.systemSettings.singbox_linter_enabled = String(linterEnabled);
+      ws.systemSettings.git_use_proxy = String(gitUseProxy);
       await ws.saveSettings(ws.systemSettings);
       ws.showToast('系统设置已持久化保存 ✓', 'success');
 
@@ -73,6 +77,23 @@
       ws.showToast('保存失败', 'error');
     } finally {
       isSavingSettings = false;
+    }
+  }
+
+  async function handleTestGitPush() {
+    if (isPushingGit || isSavingSettings) return;
+    isPushingGit = true;
+    try {
+      ws.systemSettings.singbox_linter_enabled = String(linterEnabled);
+      ws.systemSettings.git_use_proxy = String(gitUseProxy);
+      await ws.saveSettings(ws.systemSettings);
+      await api.testGitPush();
+      ws.showToast('Git 远端推送测试成功 ✓', 'success');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '推送失败';
+      ws.showToast(msg, 'error');
+    } finally {
+      isPushingGit = false;
     }
   }
 
@@ -135,7 +156,7 @@
               <!-- 代理与下载加速源 -->
               <div class="space-y-2">
                 <label class="block">
-                  <span class="block text-[11px] font-medium text-zinc-600 dark:text-zinc-300 mb-1">GitHub API 下载加速代理 (HTTP / SOCKS5)</span>
+                  <span class="block text-xs font-medium text-zinc-600 dark:text-zinc-300 mb-1">外部网络代理 (HTTP / SOCKS5，可用于内核更新与 Git 推送)</span>
                   <input
                     bind:value={ws.systemSettings.github_proxy}
                     placeholder="如 socks5h://127.0.0.1:20122 留空直连"
@@ -371,38 +392,64 @@
           </div>
         </div>
 
-        <!-- GitOps 异地镜像灾备 -->
+        <!-- GitOps 仓库同步备份 -->
         <div class="space-y-3 border-t border-zinc-100 pt-5 dark:border-zinc-800">
-          <span class="font-bold text-zinc-800 dark:text-zinc-100 block text-sm">GitOps 异地镜像灾备</span>
+          <span class="font-bold text-zinc-800 dark:text-zinc-100 block text-sm">GitOps 仓库同步备份 (请使用 Private 私有库)</span>
           <div class="space-y-2">
-            <label class="block">
-              <span class="block text-xs text-zinc-400 mb-1">远端 Git 仓库地址</span>
-              <input
-                bind:value={ws.systemSettings.git_remote_url}
-                placeholder="如 http://git.lan/repo.git"
-                class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950"
-              />
-            </label>
+            <div class="grid grid-cols-3 gap-2">
+              <label class="block col-span-2">
+                <span class="block text-xs text-zinc-400 mb-1">远端 Git 仓库地址</span>
+                <input
+                  bind:value={ws.systemSettings.git_remote_url}
+                  placeholder="https://github.com/user/backup.git"
+                  class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+
+              <label class="block">
+                <span class="block text-xs text-zinc-400 mb-1">目标分支</span>
+                <input
+                  bind:value={ws.systemSettings.git_branch}
+                  placeholder="main"
+                  class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+            </div>
 
             <label class="block">
-              <span class="block text-xs text-zinc-400 mb-1">Git 访问令牌 (PAT) - <span class="text-blue-500 font-medium">用于拉取内核与异地推送</span></span>
+              <span class="block text-xs text-zinc-400 mb-1">通用 Git 令牌 (GitHub/Gitea/GitLab 直接填 Token，特殊平台填 user:pass)</span>
               <input
                 bind:value={ws.systemSettings.git_token}
-                placeholder="Personal Access Token"
+                placeholder="PAT / Access Token"
                 type="password"
                 class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950"
               />
             </label>
+
+            <label class="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300 cursor-pointer pt-1 select-none">
+              <input type="checkbox" bind:checked={gitUseProxy} class="rounded cursor-pointer" />
+              <span>推送时走外部网络代理 (推 GitHub 勾选，推内网自建库关闭)</span>
+            </label>
           </div>
 
-          <button
-            disabled={isSavingSettings}
-            onclick={handleSaveSettings}
-            type="button"
-            class="w-full rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 py-2 text-xs font-semibold hover:opacity-90 transition cursor-pointer shadow-sm"
-          >
-            {isSavingSettings ? '保存中...' : '保存系统设置'}
-          </button>
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              disabled={isSavingSettings || isPushingGit}
+              onclick={handleSaveSettings}
+              type="button"
+              class="rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 py-2 text-xs font-semibold hover:opacity-90 transition cursor-pointer shadow-sm disabled:opacity-60"
+            >
+              {isSavingSettings ? '保存中...' : '保存系统设置'}
+            </button>
+            <button
+              disabled={isPushingGit || isSavingSettings}
+              onclick={handleTestGitPush}
+              type="button"
+              class="rounded-lg border border-blue-600 bg-blue-600/10 text-blue-600 dark:text-blue-400 py-2 text-xs font-semibold hover:bg-blue-600/20 transition cursor-pointer disabled:opacity-60"
+            >
+              {isPushingGit ? '推送中...' : '保存并测试推送'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

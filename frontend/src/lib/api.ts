@@ -295,6 +295,12 @@ class ApiClient {
   async triggerUpdate(): Promise<void> {
     return this.request<void>('/api/system/updater/trigger', { method: 'POST' });
   }
+
+  async testGitPush(): Promise<{ status: string }> {
+    return this.request<{ status: string }>('/api/system/git/push', { method: 'POST' });
+  }
 }
+
+
 
 export const api = new ApiClient();

@@ -2,6 +2,7 @@
 package versioning
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 type GitRepo struct {
 	repoDir string
 	mu      sync.Mutex
+	pushMu  sync.Mutex
 }
 
 func NewGitRepo(baseDir string) (*GitRepo, error) {
@@ -180,4 +182,63 @@ func (g *GitRepo) CommitComponentTemplate(compID string, compName string, tmplCo
 	}
 
 	return g.runOutput("rev-parse", "--short", "HEAD")
+}
+
+// PushRemote 通用远端推送（不修改 .git/config，支持 GitHub / Gitea / Forgejo / GitLab / SSH）
+func (g *GitRepo) PushRemote(remoteURL, branch, token, proxyURL string) error {
+	g.pushMu.Lock()
+	defer g.pushMu.Unlock()
+
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return fmt.Errorf("未配置远端 Git 仓库地址")
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		branch = "main"
+	}
+
+	g.mu.Lock()
+	_, headErr := g.runOutput("rev-parse", "--verify", "HEAD")
+	g.mu.Unlock()
+	if headErr != nil {
+		return fmt.Errorf("本地尚无快照提交，请先在 Studio 编译任意方案后再推送")
+	}
+
+	var args []string
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+
+	token = strings.TrimSpace(token)
+	if token != "" && (strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://")) {
+		gitUser, gitPass, hasColon := strings.Cut(token, ":")
+		if !hasColon {
+			gitUser = "oauth2"
+			gitPass = token
+		}
+		env = append(env, "SINGHUB_GIT_USER="+gitUser, "SINGHUB_GIT_PASS="+gitPass)
+		args = append(args, "-c", `credential.helper=!f() { printf "username=%s\npassword=%s\n" "$SINGHUB_GIT_USER" "$SINGHUB_GIT_PASS"; }; f`)
+	}
+
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL != "" && (strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://")) {
+		args = append(args, "-c", "http.proxy="+proxyURL)
+	}
+
+	args = append(args, "push", remoteURL, "HEAD:"+branch)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = g.repoDir
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if token != "" {
+			msg = strings.ReplaceAll(msg, token, "***")
+		}
+		return fmt.Errorf("git push failed: %s (%w)", msg, err)
+	}
+	return nil
 }

@@ -195,7 +195,6 @@ func (u *Updater) runUpdateFlow() error {
 		return fmt.Errorf("无法创建下载目录: %w", err)
 	}
 
-	token := u.store.GetSetting(ctx, "git_token", "")
 	mirror := strings.TrimRight(u.store.GetSetting(ctx, "github_mirror", ""), "/")
 
 	proxyClient, err := u.getHTTPClient(ctx)
@@ -205,12 +204,12 @@ func (u *Updater) runUpdateFlow() error {
 
 	var errs []string
 	if channel == "stable" || channel == "all" {
-		if err := u.downloadChannel(ctx, "stable", token, mirror, proxyClient); err != nil {
+		if err := u.downloadChannel(ctx, "stable", mirror, proxyClient); err != nil {
 			errs = append(errs, "Stable: "+err.Error())
 		}
 	}
 	if channel == "alpha" || channel == "all" {
-		if err := u.downloadChannel(ctx, "alpha", token, mirror, proxyClient); err != nil {
+		if err := u.downloadChannel(ctx, "alpha", mirror, proxyClient); err != nil {
 			errs = append(errs, "Alpha: "+err.Error())
 		}
 	}
@@ -248,16 +247,13 @@ func pickBestAsset(assets []releaseAsset) (string, error) {
 	return "", fmt.Errorf("未在 Release 资产中找到适用于 linux-%s 的安全静态构建包", runtime.GOARCH)
 }
 
-func (u *Updater) downloadChannel(ctx context.Context, channel string, token string, mirror string, proxyClient *http.Client) error {
+func (u *Updater) downloadChannel(ctx context.Context, channel string, mirror string, proxyClient *http.Client) error {
 	apiURL := "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 	if channel == "alpha" {
 		apiURL = "https://api.github.com/repos/SagerNet/sing-box/releases"
 	}
 
 	req, _ := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "token "+token)
-	}
 
 	resp, err := proxyClient.Do(req)
 	if err != nil {

@@ -302,6 +302,23 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 	if e.gitRepo != nil {
 		sqlDump, _ := e.store.DumpSQL(ctx)
 		commitHash, _ = e.gitRepo.CommitSnapshot(profileID, finalJSON, sqlDump)
+
+		remoteURL := strings.TrimSpace(e.store.GetSetting(ctx, "git_remote_url", ""))
+		if remoteURL != "" {
+			branch := e.store.GetSetting(ctx, "git_branch", "main")
+			token := e.store.GetSetting(ctx, "git_token", "")
+			proxyURL := ""
+			if e.store.GetSetting(ctx, "git_use_proxy", "false") == "true" {
+				proxyURL = e.store.GetSetting(ctx, "github_proxy", "")
+			}
+			go func() {
+				if err := e.gitRepo.PushRemote(remoteURL, branch, token, proxyURL); err != nil {
+					slog.Warn("gitops remote push failed", "remote", remoteURL, "err", err)
+				} else {
+					slog.Info("gitops remote push success", "remote", remoteURL, "branch", branch)
+				}
+			}()
+		}
 	}
 
 	// 仅在前端显式编译时执行双轨校验

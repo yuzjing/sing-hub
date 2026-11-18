@@ -139,6 +139,7 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /api/system/log-level", s.handleGetLogLevel)
 	s.mux.HandleFunc("POST /api/system/log-level", s.handleSetLogLevel)
+	s.mux.HandleFunc("POST /api/system/git/push", s.handleTestGitPush)
 
 	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	s.mux.HandleFunc("POST /api/settings", s.handleSaveSettings)
@@ -515,6 +516,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"github_mirror":          "", // 👑 补齐镜像项
 		"git_token":              "",
 		"ssh_timeout":            "10",
+		"git_use_proxy":          "false",
 		"singbox_update_channel": "all",
 		"singbox_linter_enabled": "true",
 	}
@@ -752,4 +754,24 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 func readJSON(r *http.Request, target any) error {
 	defer r.Body.Close()
 	return json.NewDecoder(io.LimitReader(r.Body, 10<<20)).Decode(target)
+}
+
+func (s *Server) handleTestGitPush(w http.ResponseWriter, r *http.Request) {
+	if s.gitRepo == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git repo not initialized"})
+		return
+	}
+	remoteURL := s.store.GetSetting(r.Context(), "git_remote_url", "")
+	branch := s.store.GetSetting(r.Context(), "git_branch", "main")
+	token := s.store.GetSetting(r.Context(), "git_token", "")
+	proxyURL := ""
+	if s.store.GetSetting(r.Context(), "git_use_proxy", "false") == "true" {
+		proxyURL = s.store.GetSetting(r.Context(), "github_proxy", "")
+	}
+
+	if err := s.gitRepo.PushRemote(remoteURL, branch, token, proxyURL); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed"})
 }
