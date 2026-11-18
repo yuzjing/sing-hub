@@ -151,19 +151,29 @@ type strategyPlan struct {
 
 func buildStrategyPlan(strategy, svc, envPrefix, tempPath string) strategyPlan {
 	scDetect := fmt.Sprintf(
-		`SVC=%s; SC=""; `+
+		`SVC=%s; SC_MODE=""; `+
 			`if [ "$CURRENT_UID" -eq 0 ]; then `+
-			`if systemctl cat "$SVC.service" >/dev/null 2>&1; then SC="systemctl"; fi; `+
-			`elif systemctl --user cat "$SVC.service" >/dev/null 2>&1; then SC="systemctl --user"; `+
-			`elif systemctl cat "$SVC.service" >/dev/null 2>&1; then SC="sudo -n systemctl"; fi; `,
+			`systemctl cat "$SVC.service" >/dev/null 2>&1 && SC_MODE="system"; `+
+			`elif systemctl --user cat "$SVC.service" >/dev/null 2>&1; then `+
+			`SC_MODE="user"; `+
+			`elif systemctl cat "$SVC.service" >/dev/null 2>&1; then `+
+			`SC_MODE="sudo"; `+
+			`fi; `+
+			`sc() { `+
+			`case "$SC_MODE" in `+
+			`system) systemctl "$@" ;; `+
+			`user) systemctl --user "$@" ;; `+
+			`sudo) sudo -n systemctl "$@" ;; `+
+			`*) return 1 ;; `+
+			`esac; `+
+			`}; `,
 		svc,
 	)
 	baseEnv := envPrefix + scDetect
 
-	// 仅原生 systemd / standalone 使用：优先 $PATH，找不到则向 systemd 询问 ExecStart 二进制路径
 	binDetect := `BIN=$(command -v sing-box 2>/dev/null); ` +
-		`if [ -z "$BIN" ] && [ -n "$SC" ]; then ` +
-		`CAND=$($SC show -p ExecStart --value "$SVC.service" 2>/dev/null | sed -n 's/.*path=\([^ ;]*\).*/\1/p' | head -n1); ` +
+		`if [ -z "$BIN" ] && [ -n "$SC_MODE" ]; then ` +
+		`CAND=$(sc show -p ExecStart --value "$SVC.service" 2>/dev/null | sed -n 's/.*path=\([^ ;]*\).*/\1/p' | head -n1); ` +
 		`case "$(basename "$CAND" 2>/dev/null)" in sing-box*) [ -x "$CAND" ] && BIN="$CAND" ;; esac; ` +
 		`fi; `
 
@@ -177,10 +187,10 @@ func buildStrategyPlan(strategy, svc, envPrefix, tempPath string) strategyPlan {
 					`else echo "[i] 容器当前未运行，跳过远端 exec 预检（已在控制面完成校验）"; fi`,
 				tempPath,
 			),
-			reloadCmd: baseEnv + `if [ -n "$SC" ]; then $SC reset-failed "$SVC" 2>/dev/null; $SC restart "$SVC"; else podman restart "$SVC"; fi`,
-			statusCmd: baseEnv + `if [ -n "$SC" ]; then $SC is-active --quiet "$SVC"; else [ "$(podman inspect -f '{{.State.Running}}' "$SVC" 2>/dev/null)" = "true" ]; fi`,
-			logCaptureCmd: baseEnv + `if [ "$SC" = "systemctl --user" ]; then journalctl --user -u "$SVC" -n 25 --no-pager 2>&1; ` +
-				`elif [ -n "$SC" ]; then journalctl -u "$SVC" -n 25 --no-pager 2>&1 || $SC status "$SVC" --no-pager -l 2>&1; ` +
+			reloadCmd: baseEnv + `if [ -n "$SC_MODE" ]; then sc reset-failed "$SVC" 2>/dev/null; sc restart "$SVC"; else podman restart "$SVC"; fi`,
+			statusCmd: baseEnv + `if [ -n "$SC_MODE" ]; then sc is-active --quiet "$SVC"; else [ "$(podman inspect -f '{{.State.Running}}' "$SVC" 2>/dev/null)" = "true" ]; fi`,
+			logCaptureCmd: baseEnv + `if [ "$SC_MODE" = "user" ]; then journalctl --user -u "$SVC" -n 25 --no-pager 2>&1; ` +
+				`elif [ -n "$SC_MODE" ]; then journalctl -u "$SVC" -n 25 --no-pager 2>&1 || sc status "$SVC" --no-pager -l 2>&1; ` +
 				`else podman logs --tail 25 "$SVC" 2>&1; fi`,
 		}
 
@@ -193,9 +203,9 @@ func buildStrategyPlan(strategy, svc, envPrefix, tempPath string) strategyPlan {
 					`else echo "[i] 容器当前未运行，跳过远端 exec 预检（已在控制面完成校验）"; fi`,
 				tempPath,
 			),
-			reloadCmd:     baseEnv + `if [ -n "$SC" ]; then $SC reset-failed "$SVC" 2>/dev/null; $SC restart "$SVC"; else docker restart "$SVC"; fi`,
-			statusCmd:     baseEnv + `if [ -n "$SC" ]; then $SC is-active --quiet "$SVC"; else [ "$(docker inspect -f '{{.State.Running}}' "$SVC" 2>/dev/null)" = "true" ]; fi`,
-			logCaptureCmd: baseEnv + `if [ -n "$SC" ]; then journalctl -u "$SVC" -n 25 --no-pager 2>&1; else docker logs --tail 25 "$SVC" 2>&1; fi`,
+			reloadCmd:     baseEnv + `if [ -n "$SC_MODE" ]; then sc reset-failed "$SVC" 2>/dev/null; sc restart "$SVC"; else docker restart "$SVC"; fi`,
+			statusCmd:     baseEnv + `if [ -n "$SC_MODE" ]; then sc is-active --quiet "$SVC"; else [ "$(docker inspect -f '{{.State.Running}}' "$SVC" 2>/dev/null)" = "true" ]; fi`,
+			logCaptureCmd: baseEnv + `if [ -n "$SC_MODE" ]; then journalctl -u "$SVC" -n 25 --no-pager 2>&1; else docker logs --tail 25 "$SVC" 2>&1; fi`,
 		}
 
 	case "standalone":
@@ -208,8 +218,8 @@ func buildStrategyPlan(strategy, svc, envPrefix, tempPath string) strategyPlan {
 		}
 
 	default: // systemd：100% 原生 Systemd 主导生命周期，通过 ExecStart 精确识别底层执行器
-		execDetect := `if [ -z "$SC" ]; then echo "未找到 systemd 服务单元: $SVC.service" >&2; exit 1; fi; ` +
-			`EXEC_LINE=$($SC show -p ExecStart --value "$SVC.service" 2>/dev/null); ` +
+		execDetect := `if [ -z "$SC_MODE" ]; then echo "未找到 systemd 服务单元: $SVC.service" >&2; exit 1; fi; ` +
+			`EXEC_LINE=$(sc show -p ExecStart --value "$SVC.service" 2>/dev/null); ` +
 			`EXEC_BIN=$(printf '%s' "$EXEC_LINE" | sed -n 's/.*path=\([^ ;]*\).*/\1/p' | head -n1); ` +
 			`CNAME=$(printf '%s' "$EXEC_LINE" | sed -n 's/.*--name[= ]\([^ ;]*\).*/\1/p' | head -n1); ` +
 			`[ -n "$CNAME" ] || CNAME="$SVC"; `
@@ -230,10 +240,10 @@ func buildStrategyPlan(strategy, svc, envPrefix, tempPath string) strategyPlan {
 					`esac`,
 				tempPath, tempPath, tempPath,
 			),
-			reloadCmd: baseEnv + `if [ -z "$SC" ]; then echo "未找到 systemd 服务单元: $SVC.service" >&2; exit 1; fi; $SC reset-failed "$SVC" 2>/dev/null; $SC restart "$SVC"`,
-			statusCmd: baseEnv + `[ -n "$SC" ] && $SC is-active --quiet "$SVC"`,
-			logCaptureCmd: baseEnv + `if [ "$SC" = "systemctl --user" ]; then journalctl --user -u "$SVC" -n 25 --no-pager 2>&1; ` +
-				`else journalctl -u "$SVC" -n 25 --no-pager 2>&1 || $SC status "$SVC" --no-pager -l 2>&1; fi`,
+			reloadCmd: baseEnv + `if [ -z "$SC_MODE" ]; then echo "未找到 systemd 服务单元: $SVC.service" >&2; exit 1; fi; sc reset-failed "$SVC" 2>/dev/null; sc restart "$SVC"`,
+			statusCmd: baseEnv + `[ -n "$SC_MODE" ] && sc is-active --quiet "$SVC"`,
+			logCaptureCmd: baseEnv + `if [ "$SC_MODE" = "user" ]; then journalctl --user -u "$SVC" -n 25 --no-pager 2>&1; ` +
+				`else journalctl -u "$SVC" -n 25 --no-pager 2>&1 || sc status "$SVC" --no-pager -l 2>&1; fi`,
 		}
 	}
 }
