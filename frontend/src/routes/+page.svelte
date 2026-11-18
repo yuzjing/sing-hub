@@ -21,6 +21,7 @@
   import ProfileModal from '$lib/components/ProfileModal.svelte';
 
   let showMountDrawer = $state(false);
+  let isCloning = $state(false);
 
   // 方案配方
   let isProfileManageMode = $state(false);
@@ -115,6 +116,7 @@
     showNewCompModal = false;
     editingComponent = null;
     ws.showToast('母版保存成功 ✓', 'success');
+    isCloning = false;
   }
 
   async function handleSaveModule(mod: Module) {
@@ -128,6 +130,7 @@
     tuningModule = null;
     ws.showToast('成品积木已保存 ✓', 'success');
     if (ws.activeProfileId) ws.triggerCompile();
+    isCloning = false;
   }
 
   async function handleSaveDevice(d: Device) {
@@ -136,6 +139,7 @@
     showDeviceModal = false;
     editingDevice = null;
     ws.showToast('节点保存成功 ✓', 'success');
+    isCloning = false;
   }
 </script>
 
@@ -281,7 +285,7 @@
             <Icon name="refresh" size={13} class={ws.isPingAllLoading ? 'animate-spin' : ''} />
             <span>{ws.isPingAllLoading ? '探测中...' : '一键全网探活'}</span>
           </button>
-          <button onclick={() => { editingDevice = null; showDeviceModal = true; }} type="button" class="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 shadow-xs transition cursor-pointer flex items-center gap-1.5">
+          <button onclick={() => { isCloning = false; editingDevice = null; showDeviceModal = true; }} type="button" class="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 shadow-xs transition cursor-pointer flex items-center gap-1.5">
             <Icon name="plus" size={14} />
             <span>接入新节点</span>
           </button>
@@ -295,10 +299,11 @@
         <StudioWorkspace
           bind:isProfileManageMode
           bind:selectedProfileIds
-          onNewProfile={() => { editingProfile = null; showProfileModal = true; }}
-          onEditProfile={(p: Profile) => { editingProfile = p; showProfileModal = true; }}
+          onNewProfile={() => { isCloning = false; editingProfile = null; showProfileModal = true; }}
+          onEditProfile={(p: Profile) => { isCloning = false; editingProfile = p; showProfileModal = true; }}
           onCloneProfile={(source: Profile) => {
-            editingProfile = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)`, token: crypto.randomUUID().replace(/-/g, '').slice(0, 16) };
+            isCloning = false;
+            editingProfile = { ...source, id: `${source.id}-copy-${Date.now().toString(36).slice(-4)}`, name: `${source.name} (副本)`, token: crypto.randomUUID().replace(/-/g, '').slice(0, 16) };
             showProfileModal = true;
           }}
           onOpenMount={() => (showMountDrawer = true)}
@@ -309,9 +314,10 @@
           bind:activeModuleId
           bind:isModuleManageMode
           bind:selectedModuleIds
-          onNewModule={() => { editingModule = null; showModuleMetaModal = true; }}
-          onEditModuleMeta={(mod: Module) => { editingModule = mod; showModuleMetaModal = true; }}
+          onNewModule={() => { isCloning = false; editingModule = null; showModuleMetaModal = true; }}
+          onEditModuleMeta={(mod: Module) => { isCloning = false; editingModule = mod; showModuleMetaModal = true; }}
           onCloneModule={(source: Module) => {
+            isCloning = true;
             editingModule = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
             showModuleMetaModal = true;
           }}
@@ -322,9 +328,10 @@
           bind:studioActiveCompId
           bind:isCompManageMode
           bind:selectedCompIds
-          onNewComponent={() => { editingComponent = null; showNewCompModal = true; }}
-          onEditComponent={(comp: Component) => { editingComponent = comp; showNewCompModal = true; }}
+          onNewComponent={() => { isCloning = false; editingComponent = null; showNewCompModal = true; }}
+          onEditComponent={(comp: Component) => { isCloning = false; editingComponent = comp; showNewCompModal = true; }}
           onCloneComponent={(source: Component) => {
+            isCloning = true;
             editingComponent = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
             showNewCompModal = true;
           }}
@@ -334,8 +341,9 @@
         <FleetWorkspace
           bind:isDeviceManageMode
           bind:selectedDeviceIds
-          onEditDevice={(dev: Device) => { editingDevice = dev; showDeviceModal = true; }}
+          onEditDevice={(dev: Device) => { isCloning = false; editingDevice = dev; showDeviceModal = true; }}
           onCloneDevice={(source: Device) => {
+            isCloning = true;
             editingDevice = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
             showDeviceModal = true;
           }}
@@ -372,10 +380,10 @@
 <!-- 模态框与抽屉组 -->
 <MountDrawer open={showMountDrawer} onClose={async () => { showMountDrawer = false; await ws.loadProfiles(); }} />
 <SettingsDrawer open={ws.showSettingsDrawer} onClose={() => (ws.showSettingsDrawer = false)} />
-<ComponentModal open={showNewCompModal} editComponent={editingComponent} onClose={() => { showNewCompModal = false; editingComponent = null; }} onSave={handleSaveComponent} />
-<ModuleMetaModal open={showModuleMetaModal} editModule={editingModule} onClose={() => { showModuleMetaModal = false; editingModule = null; }} onSave={handleSaveModule} />
+<ComponentModal open={showNewCompModal} editComponent={editingComponent} isClone={isCloning} onClose={() => { showNewCompModal = false; editingComponent = null; isCloning = false; }} onSave={handleSaveComponent} />
+<ModuleMetaModal open={showModuleMetaModal} editModule={editingModule} isClone={isCloning} onClose={() => { showModuleMetaModal = false; editingModule = null; isCloning = false; }} onSave={handleSaveModule} />
 <ModuleParamsModal open={showModuleParamsModal} module={tuningModule} onClose={() => { showModuleParamsModal = false; tuningModule = null; }} onSave={handleSaveModule} />
-<DeviceModal open={showDeviceModal} editDevice={editingDevice} onClose={() => (showDeviceModal = false)} onSave={handleSaveDevice} />
+<DeviceModal open={showDeviceModal} editDevice={editingDevice} isClone={isCloning} onClose={() => { showDeviceModal = false; editingDevice = null; isCloning = false; }} onSave={handleSaveDevice} />
 <ProfileModal open={showProfileModal} editProfile={editingProfile} onClose={() => (showProfileModal = false)} onSave={handleSaveProfile} />
 
 <ConfirmModal

@@ -7,6 +7,7 @@
   interface Props {
     open?: boolean;
     editComponent?: Component | null;
+    isClone?: boolean;
     onClose?: () => void;
     onSave?: (comp: Component) => void | Promise<void>;
   }
@@ -14,6 +15,7 @@
   let {
     open = false,
     editComponent = null,
+    isClone = false,
     onClose = () => {},
     onSave = () => {}
   }: Props = $props();
@@ -33,6 +35,7 @@
   $effect(() => {
     if (open) {
       if (editComponent) {
+        autoDraftId = isClone ? ('comp-' + Date.now().toString(36)) : '';
         id = editComponent.id;
         name = editComponent.name;
         category = editComponent.category || 'io';
@@ -102,7 +105,7 @@
       <div class="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
         <h3 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
           <Icon name="sliders" color="emerald" size={17} />
-          <span>{editComponent ? '编辑语法母版元数据' : '新建语法母版 (Template)'}</span>
+          <span>{isClone ? '克隆语法母版 (Template)' : (editComponent ? '编辑语法母版元数据' : '新建语法母版 (Template)')}</span>
         </h3>
         <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
           <Icon name="close" size={15} />
@@ -115,7 +118,7 @@
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">母版唯一 ID</span>
             <input
               bind:value={id}
-              disabled={!!editComponent}
+              disabled={!!editComponent && !isClone}
               placeholder="留空自动生成"
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
             />

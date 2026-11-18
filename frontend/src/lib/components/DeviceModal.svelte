@@ -7,11 +7,12 @@
   interface Props {
     open?: boolean;
     editDevice?: Device | null;
+    isClone?: boolean;
     onClose?: (e?: MouseEvent) => void;
     onSave?: (d: Device) => void | Promise<void>;
   }
 
-  let { open = false, editDevice = null, onClose = () => {}, onSave = () => {} }: Props = $props();
+  let { open = false, editDevice = null, isClone = false, onClose = () => {}, onSave = () => {} }: Props = $props();
 
   let saving = $state(false);
   let autoDraftId = $state('');
@@ -38,6 +39,7 @@
   $effect(() => {
     if (open) {
       if (editDevice) {
+        autoDraftId = isClone ? ('node-' + Date.now().toString(36)) : '';
         id = editDevice.id;
         name = editDevice.name;
         targetProfileId = editDevice.target_profile_id || '';
@@ -135,7 +137,7 @@
       <div class="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800 shrink-0">
         <h3 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
           <Icon name="server" color="blue" size={17} />
-          <span>{editDevice ? '编辑网络节点与实例' : '接入新网络节点'}</span>
+          <span>{isClone ? '克隆网络节点与实例' : (editDevice ? '编辑网络节点与实例' : '接入新网络节点')}</span>
         </h3>
         <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
           <Icon name="close" size={15} />
@@ -146,7 +148,7 @@
         <div class="grid grid-cols-2 gap-3">
           <label class="block">
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">节点唯一 ID</span>
-            <input bind:value={id} disabled={!!editDevice} placeholder="留空自动生成" class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <input bind:value={id} disabled={!!editDevice && !isClone} placeholder="留空自动生成" class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </label>
           <label class="block">
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">节点名称</span>

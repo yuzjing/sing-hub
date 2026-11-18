@@ -7,6 +7,7 @@
   interface Props {
     open?: boolean;
     editModule?: Module | null;
+    isClone?: boolean;
     onClose?: () => void;
     onSave?: (mod: Module) => void | Promise<void>;
   }
@@ -14,6 +15,7 @@
   let {
     open = false,
     editModule = null,
+    isClone = false,
     onClose = () => {},
     onSave = () => {}
   }: Props = $props();
@@ -29,6 +31,7 @@
   $effect(() => {
     if (open) {
       if (editModule) {
+        autoDraftId = isClone ? ('mod-' + Date.now().toString(36)) : '';
         id = editModule.id;
         name = editModule.name;
         templateId = editModule.template_id;
@@ -90,7 +93,7 @@
       <div class="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
         <h3 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
           <Icon name="boxes" color="blue" size={17} />
-          <span>{editModule ? '编辑积木基础属性' : '新建成品积木'}</span>
+          <span>{isClone ? '克隆成品积木' : (editModule ? '编辑积木基础属性' : '新建成品积木')}</span>
         </h3>
         <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
           <Icon name="close" size={15} />
@@ -103,8 +106,8 @@
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">成品积木 ID</span>
             <input
               bind:value={id}
-              disabled={!!editModule}
-              placeholder="如 out-hk-cn2"
+              disabled={!!editModule && !isClone}
+              placeholder="留空自动生成"
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
             />
           </label>
