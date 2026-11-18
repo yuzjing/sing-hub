@@ -303,7 +303,13 @@
           onEditProfile={(p: Profile) => { isCloning = false; editingProfile = p; showProfileModal = true; }}
           onCloneProfile={(source: Profile) => {
             isCloning = false;
-            editingProfile = { ...source, id: `${source.id}-copy-${Date.now().toString(36).slice(-4)}`, name: `${source.name} (副本)`, token: crypto.randomUUID().replace(/-/g, '').slice(0, 16) };
+            editingProfile = {
+              ...source,
+              id: `${source.id}-copy-${Date.now().toString(36).slice(-4)}`,
+              name: `${source.name} (副本)`,
+              token: crypto.randomUUID().replace(/-/g, '').slice(0, 16),
+              modules: (source.modules || []).map(m => ({ ...m, id: '', profile_id: '' })),
+            };
             showProfileModal = true;
           }}
           onOpenMount={() => (showMountDrawer = true)}

@@ -478,10 +478,7 @@ func (s *Store) SaveProfile(ctx context.Context, p model.Profile) error {
 	}
 
 	for idx, b := range p.Modules {
-		bindID := b.ID
-		if strings.TrimSpace(bindID) == "" {
-			bindID = fmt.Sprintf("bind-%s-%s-%d", p.ID, b.ModuleID, idx)
-		}
+		bindID := fmt.Sprintf("bind-%s-%s-%d", p.ID, b.ModuleID, idx)
 		order := b.OrderIndex
 		if order == 0 {
 			order = idx + 1
