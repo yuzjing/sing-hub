@@ -226,30 +226,37 @@
                   </div>
                 </div>
 
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2.5 shrink-0">
                   {#if dev.enable_ping}
                     {#if ws.nodePingStatuses[dev.id]?.loading}
-                      <span class="font-mono text-sm font-semibold text-zinc-500 animate-pulse flex items-center gap-1.5">
-                        <Icon name="refresh" size={14} class="animate-spin" />
-                        <span>探测中...</span>
-                      </span>
+                      <div class="flex h-7 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50/70 px-3 font-mono text-xs font-semibold text-blue-600 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-400 shadow-2xs whitespace-nowrap">
+                        <span class="inline-block h-2 w-2 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"></span>
+                        <span>探测中</span>
+                      </div>
                     {:else if ws.nodePingStatuses[dev.id]?.online}
                       {@const ms = ws.nodePingStatuses[dev.id]?.latency ?? 0}
-                      <div class="flex items-center gap-2 rounded-full px-3 py-1 font-mono text-sm font-bold border {ms < 100 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-900/50' : ms < 250 ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-400 dark:border-amber-900/50' : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-400 dark:border-rose-900/50'} shadow-2xs">
-                        <span class="h-2 w-2 rounded-full {ms < 100 ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : ms < 250 ? 'bg-amber-500 shadow-[0_0_6px_#f59e0b]' : 'bg-rose-500 shadow-[0_0_6px_#f43f5e]'}"></span>
+                      <div class="flex h-7 items-center gap-1.5 rounded-full px-3 font-mono text-xs font-bold border shadow-2xs whitespace-nowrap {ms < 150 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-900/50' : ms < 300 ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-400 dark:border-amber-900/50' : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-400 dark:border-rose-900/50'}">
+                        <span class="h-2 w-2 rounded-full {ms < 150 ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : ms < 300 ? 'bg-amber-500 shadow-[0_0_6px_#f59e0b]' : 'bg-rose-500 shadow-[0_0_6px_#f43f5e]'}"></span>
                         <span>{ms}ms</span>
                       </div>
                     {:else if ws.nodePingStatuses[dev.id]?.online === false}
-                      <span title={ws.nodePingStatuses[dev.id]?.error} class="flex items-center gap-1.5 text-sm font-mono text-rose-600 font-extrabold bg-rose-50 border border-rose-200 dark:bg-rose-950/60 dark:border-rose-900/50 px-3 py-1 rounded-full shadow-2xs">
-                        <span class="h-2 w-2 rounded-full bg-rose-500"></span>
-                        <span>阻断</span>
-                      </span>
+                      <div title={ws.nodePingStatuses[dev.id]?.error} class="flex h-7 items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 font-mono text-xs font-bold text-rose-600 dark:border-rose-900/50 dark:bg-rose-950/60 dark:text-rose-400 shadow-2xs whitespace-nowrap">
+                        <span class="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_6px_#f43f5e]"></span>
+                        <span>离线阻断</span>
+                      </div>
                     {:else}
-                      <span class="font-mono text-xs font-semibold text-zinc-400 bg-zinc-50 dark:bg-zinc-800/50 px-3 py-1 rounded-full border border-zinc-200 dark:border-zinc-800">等待探测</span>
+                      <div class="flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 font-mono text-xs font-medium text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/50 dark:text-zinc-400 shadow-2xs whitespace-nowrap">
+                        <span class="h-2 w-2 rounded-full bg-zinc-300 dark:bg-zinc-600"></span>
+                        <span>待探测</span>
+                      </div>
                     {/if}
                   {:else}
-                    <span class="font-mono text-xs font-semibold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg">探活已禁</span>
+                    <div class="flex h-7 items-center rounded-lg border border-zinc-200 bg-zinc-100 px-2.5 font-mono text-xs text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/60 whitespace-nowrap">
+                      探活关闭
+                    </div>
                   {/if}
+
+                  
 
                   <div class="flex items-center border-l border-zinc-200 pl-3 dark:border-zinc-800 gap-1.5 text-zinc-400">
                     {#if dev.enable_ping}

@@ -417,18 +417,29 @@
                             </button>
                           </div>
 
-                          <!-- 右侧：挂载点微胶囊 + 修复带颜色的版本号 Badge -->
+                          <!-- 右侧：两行纵向对齐（上：挂载点微胶囊；下：版本号或首个标签） -->
                           <div class="flex items-center gap-1.5 shrink-0 pl-1.5">
                             {#if !isModuleManageMode}
-                              <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold {itemMeta.pillClass}">
-                                <span class="w-1 h-1 rounded-full {itemMeta.dotClass}"></span>
-                                <span>{itemPath}</span>
-                              </span>
-                              {#if itemVer && itemVer !== 'universal'}
-                                <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/50 dark:border-amber-800/50 font-mono text-[9px] font-bold">
-                                  v{itemVer}
+                              <div class="flex flex-col items-end gap-1">
+                                <!-- 第一行：对齐主标题 -->
+                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold {itemMeta.pillClass}">
+                                  <span class="w-1 h-1 rounded-full {itemMeta.dotClass}"></span>
+                                  <span>{itemPath}</span>
                                 </span>
-                              {/if}
+
+                                <!-- 第二行：对齐浅灰ID，优先版本号，无版本则显示第一个Tag -->
+                                {#if itemVer && itemVer !== 'universal'}
+                                  <span class="px-1.5 py-0.2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/50 dark:border-amber-800/50 font-mono text-[9px] font-bold">
+                                    v{itemVer}
+                                  </span>
+                                {:else if mod.tags && mod.tags.length > 0}
+                                  <span class="text-[9px] font-mono text-zinc-400 dark:text-zinc-500">
+                                    #{mod.tags[0]}
+                                  </span>
+                                {:else}
+                                  <span class="h-3.5"></span>
+                                {/if}
+                              </div>
                             {:else}
                               <button title="克隆积木" onclick={() => onCloneModule(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
                                 <Icon name="copy" size={13} />
