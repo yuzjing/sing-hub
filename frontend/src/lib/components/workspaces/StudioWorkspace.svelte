@@ -271,15 +271,16 @@
     {/if}
 
     <div class="flex-1 overflow-y-auto p-3 space-y-2">
+      
       {#each ws.profiles.filter((p: Profile) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (p.tags || []).includes(t))) as p (p.id)}
         {@const isActive = ws.activeProfileId === p.id}
-        <div class="group relative flex flex-col justify-between rounded-xl p-3 text-xs transition border shadow-2xs space-y-2 {isActive && !isProfileManageMode ? 'border-amber-400/70 bg-white text-zinc-900 dark:border-amber-500/60 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
+        <div class="group relative flex flex-col justify-between rounded-xl p-3 text-xs transition border shadow-2xs space-y-2 {isActive && !isProfileManageMode ? 'border-amber-400/80 bg-white text-zinc-900 dark:border-amber-500/70 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
           {#if isActive && !isProfileManageMode}
             <span class="absolute left-0 top-2.5 bottom-2.5 w-1.5 rounded-r-full bg-amber-500 shadow-[0_0_8px_#f59e0b]"></span>
           {/if}
 
-          <!-- 第一行：管理勾选框 + 方案名称主标题 + 顶部操作按钮 -->
-          <div class="flex items-center justify-between gap-2 pl-1">
+          <!-- 第一行：管理勾选框 + 完整方案名称 + 右侧操作/复制按钮 -->
+          <div class="flex items-center justify-between gap-2 pl-1 w-full">
             <div class="flex items-center gap-2 min-w-0 flex-1">
               {#if isProfileManageMode}
                 <input
@@ -302,14 +303,13 @@
               </button>
             </div>
 
-            <!-- 右侧操作栏 -->
             <div class="flex items-center gap-1 shrink-0">
               {#if !isProfileManageMode}
                 {#if p.capabilities.enable_subscribe}
                   <button
                     onclick={() => copySubURL(p.token)}
                     type="button"
-                    title="复制此方案订阅链接"
+                    title="复制订阅链接"
                     class="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
                   >
                     <Icon name="link" size={13} />
@@ -329,8 +329,8 @@
             </div>
           </div>
 
-          <!-- 第二行：方案短ID + 版本Badge + 标签徽标 -->
-          <div class="flex items-center gap-1.5 flex-wrap pl-1 font-mono text-[10px]">
+          <!-- 第二行：方案短ID + 绿色版本Tag + 标签 + 积木数量 -->
+          <div class="flex items-center gap-1.5 flex-wrap pl-1 font-mono text-[10px] w-full">
             <span class="rounded bg-zinc-100 dark:bg-zinc-800/80 px-1.5 py-0.5 text-zinc-400 dark:text-zinc-500 shrink-0">
               {p.id.slice(0, 14)}
             </span>

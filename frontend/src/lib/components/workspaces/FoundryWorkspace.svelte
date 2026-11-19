@@ -334,14 +334,16 @@
               {:else}
                 {#each subGroups as group (group.mount)}
                   {@const catMountKey = `${cat.key}:${group.mount}`}
+                  {@const isGroupCollapsed = collapsedMountGroups[catMountKey] === true}
                   <div class="space-y-1">
+                    <!-- 二级标头：可点击折叠手风琴按钮 -->
                     <button
                       onclick={() => toggleMountGroup(catMountKey)}
                       type="button"
                       class="w-full flex items-center justify-between px-1.5 py-1 rounded-md hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 transition cursor-pointer select-none text-left"
                     >
                       <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold tracking-wide {group.meta.pillClass}">
-                        <span class="text-[9px] transform transition-transform duration-200 {collapsedMountGroups[catMountKey] ? '' : 'rotate-90'}">▶</span>
+                        <span class="text-[9px] transform transition-transform duration-200 {isGroupCollapsed ? '' : 'rotate-90'}">▶</span>
                         <span class="w-1.5 h-1.5 rounded-full {group.meta.dotClass}"></span>
                         <span>{group.meta.label}</span>
                       </span>
@@ -351,7 +353,7 @@
                       </span>
                     </button>
 
-                    {#if !collapsedMountGroups[catMountKey]}
+                    {#if !isGroupCollapsed}
                       {#each group.items as comp (comp.id)}
                         {@const isSelected = selectedComp?.id === comp.id}
                         <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isCompManageMode ? 'border-emerald-500/60 bg-white text-zinc-900 font-extrabold dark:border-emerald-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
@@ -359,7 +361,7 @@
                             <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-emerald-500"></span>
                           {/if}
 
-                          <div class="flex items-center gap-2 truncate flex-1 pl-1">
+                          <div class="flex items-center gap-2 truncate flex-1 pl-1 min-w-0">
                             {#if isCompManageMode}
                               <input
                                 type="checkbox"
@@ -375,17 +377,17 @@
                               onclick={() => { studioActiveCompId = comp.id; }}
                               type="button"
                               title={`${comp.name} (${comp.id})`}
-                              class="min-w-0 text-left flex-1 cursor-pointer"
+                              class="truncate text-left flex-1 cursor-pointer min-w-0"
                             >
                               <span class="block truncate font-medium">{comp.name}</span>
-                              <span class="block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500">{comp.id}</span>
+                              <span class="block truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500">{comp.id}</span>
                             </button>
                           </div>
 
-                          <div class="flex items-center gap-1.5 shrink-0">
+                          <div class="flex items-center gap-1.5 shrink-0 pl-1.5">
                             {#if !isCompManageMode}
                               {#if comp.sing_box_version && comp.sing_box_version !== 'universal'}
-                                <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[9px] font-bold">
+                                <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/50 dark:border-amber-800/50 font-mono text-[9px] font-bold">
                                   v{comp.sing_box_version}
                                 </span>
                               {/if}
@@ -403,7 +405,6 @@
                           </div>
                         </div>
                       {/each}
-                    
                     {/if}
                   </div>
                 {/each}

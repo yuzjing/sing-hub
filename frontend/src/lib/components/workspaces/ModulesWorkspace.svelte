@@ -362,37 +362,39 @@
                 <span class="text-xs text-zinc-400 italic px-2 py-2 block text-center">暂无积木</span>
               {:else}
                 {#each subGroups as group (group.mount)}
-                  {@const isGroupCollapsed = collapsedMountGroups[group.mount] === true}
                   {@const catMountKey = `${cat.key}:${group.mount}`}
+                  {@const isGroupCollapsed = collapsedMountGroups[catMountKey] === true}
                   <div class="space-y-1">
-                    <!-- 二级标头：改造成可点击折叠的手风琴按钮 -->
+                    <!-- 二级标头：可点击折叠手风琴按钮 -->
                     <button
                       onclick={() => toggleMountGroup(catMountKey)}
                       type="button"
                       class="w-full flex items-center justify-between px-1.5 py-1 rounded-md hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 transition cursor-pointer select-none text-left"
                     >
                       <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold tracking-wide {group.meta.pillClass}">
-                        <span class="text-[9px] transform transition-transform duration-200 {collapsedMountGroups[catMountKey] ? '' : 'rotate-90'}">▶</span>
+                        <span class="text-[9px] transform transition-transform duration-200 {isGroupCollapsed ? '' : 'rotate-90'}">▶</span>
                         <span class="w-1.5 h-1.5 rounded-full {group.meta.dotClass}"></span>
                         <span>{group.meta.label}</span>
                       </span>
 
-                      <!-- 二级小分组数量微标 -->
                       <span class="inline-flex min-w-4.5 h-4.5 items-center justify-center text-[10px] font-mono font-bold px-1 rounded-md bg-zinc-200/70 border border-zinc-300/60 text-zinc-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300 shadow-2xs">
                         {group.items.length}
                       </span>
                     </button>
 
-                    {#if !collapsedMountGroups[catMountKey]}
+                    {#if !isGroupCollapsed}
                       {#each group.items as mod (mod.id)}
                         {@const isSelected = selectedModule?.id === mod.id}
-                        {@const itemMeta = getMountMeta(mod.template?.mount_path)}
+                        {@const itemPath = mod.template?.mount_path || group.mount}
+                        {@const itemMeta = getMountMeta(itemPath)}
+                        {@const itemVer = mod.template?.sing_box_version || ''}
+
                         <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isModuleManageMode ? 'border-blue-500/60 bg-white text-zinc-900 font-extrabold dark:border-blue-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
                           {#if isSelected && !isModuleManageMode}
                             <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-blue-500"></span>
                           {/if}
 
-                          <div class="flex items-center gap-2 min-w-0 flex-1 pl-1">
+                          <div class="flex items-center gap-2 truncate flex-1 pl-1 min-w-0">
                             {#if isModuleManageMode}
                               <input
                                 type="checkbox"
@@ -408,23 +410,23 @@
                               onclick={() => { activeModuleId = mod.id; }}
                               type="button"
                               title={`${mod.name} (${mod.id})`}
-                              class="min-w-0 text-left flex-1 cursor-pointer"
+                              class="truncate text-left flex-1 cursor-pointer min-w-0"
                             >
                               <span class="block truncate font-medium">{mod.name}</span>
-                              <span class="block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500">{mod.id}</span>
+                              <span class="block truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500">{mod.id}</span>
                             </button>
                           </div>
 
-                          <!-- 恢复加回的右侧挂载点小胶囊 + 版本号 -->
-                          <div class="flex items-center gap-1.5 shrink-0 pl-1">
+                          <!-- 右侧：挂载点微胶囊 + 修复带颜色的版本号 Badge -->
+                          <div class="flex items-center gap-1.5 shrink-0 pl-1.5">
                             {#if !isModuleManageMode}
                               <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold {itemMeta.pillClass}">
                                 <span class="w-1 h-1 rounded-full {itemMeta.dotClass}"></span>
-                                <span>{mod.template?.mount_path || 'path'}</span>
+                                <span>{itemPath}</span>
                               </span>
-                              {#if mod.template?.sing_box_version && mod.template.sing_box_version !== 'universal'}
-                                <span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[9px] font-bold">
-                                  v{mod.template.sing_box_version}
+                              {#if itemVer && itemVer !== 'universal'}
+                                <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/50 dark:border-amber-800/50 font-mono text-[9px] font-bold">
+                                  v{itemVer}
                                 </span>
                               {/if}
                             {:else}
