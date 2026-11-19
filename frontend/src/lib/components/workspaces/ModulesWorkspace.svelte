@@ -388,6 +388,8 @@
                         {@const itemPath = mod.template?.mount_path || group.mount}
                         {@const itemMeta = getMountMeta(itemPath)}
                         {@const itemVer = mod.template?.sing_box_version || ''}
+                        {@const allTags = mod.tags || []}
+                        {@const hoverTip = [itemVer && itemVer !== 'universal' ? `版本: v${itemVer}` : '', allTags.length > 0 ? `标签: ${allTags.map(t => '#' + t).join(' ')}` : ''].filter(Boolean).join(' | ')}
 
                         <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isModuleManageMode ? 'border-blue-500/60 bg-white text-zinc-900 font-extrabold dark:border-blue-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
                           {#if isSelected && !isModuleManageMode}
@@ -417,30 +419,44 @@
                             </button>
                           </div>
 
-                          <!-- 右侧：两行纵向对齐（上：挂载点微胶囊；下：版本号或首个标签） -->
+                          <!-- 右侧：标准两行 4 象限并列架构 -->
                           <div class="flex items-center gap-1.5 shrink-0 pl-1.5">
                             {#if !isModuleManageMode}
                               <div class="flex flex-col items-end gap-1">
-                                <!-- 第一行：对齐主标题 -->
+                                <!-- 象限 2：对齐主标题，挂载点微拟态胶囊 -->
                                 <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold {itemMeta.pillClass}">
                                   <span class="w-1 h-1 rounded-full {itemMeta.dotClass}"></span>
                                   <span>{itemPath}</span>
                                 </span>
 
-                                <!-- 第二行：对齐浅灰ID，优先版本号，无版本则显示第一个Tag -->
-                                {#if itemVer && itemVer !== 'universal'}
-                                  <span class="px-1.5 py-0.2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/50 dark:border-amber-800/50 font-mono text-[9px] font-bold">
-                                    v{itemVer}
-                                  </span>
-                                {:else if mod.tags && mod.tags.length > 0}
-                                  <span class="text-[9px] font-mono text-zinc-400 dark:text-zinc-500">
-                                    #{mod.tags[0]}
-                                  </span>
-                                {:else}
-                                  <span class="h-3.5"></span>
-                                {/if}
+                                <!-- 象限 4：对齐浅灰ID，元属性并列（版本 + 标签 + 数量折叠，带悬停完整提示） -->
+                                
+                                
+                                <div class="flex items-center gap-1 font-mono text-[9px]" title={hoverTip || undefined}>
+                                  {#if itemVer && itemVer !== 'universal'}
+                                    <span class="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/50 dark:border-amber-800/50 font-bold shrink-0">
+                                      v{itemVer}
+                                    </span>
+                                  {/if}
+
+                                  {#if allTags.length > 0}
+                                    <span class="rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/40 px-1 py-0.2 truncate max-w-16 shrink-0">
+                                      #{allTags[0]}
+                                    </span>
+                                    {#if allTags.length > 1}
+                                      <span class="text-zinc-400 dark:text-zinc-500 text-[8px] font-bold">
+                                        +{allTags.length - 1}
+                                      </span>
+                                    {/if}
+                                  {/if}
+
+                                  {#if (!itemVer || itemVer === 'universal') && allTags.length === 0}
+                                    <span class="h-3.5"></span>
+                                  {/if}
+                                </div>
                               </div>
                             {:else}
+                              
                               <button title="克隆积木" onclick={() => onCloneModule(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
                                 <Icon name="copy" size={13} />
                               </button>

@@ -357,6 +357,9 @@
                       {#each group.items as comp (comp.id)}
                         {@const isSelected = selectedComp?.id === comp.id}
                         {@const itemMeta = getMountMeta(comp.mount_path)}
+                        {@const hasVer = comp.sing_box_version && comp.sing_box_version !== 'universal'}
+                        {@const hasScope = comp.scope_tag && comp.scope_tag !== 'universal'}
+                        {@const hoverTip = [hasVer ? `最低内核: v${comp.sing_box_version}` : '', hasScope ? `作用域: ${comp.scope_tag}` : ''].filter(Boolean).join(' | ')}
                         <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isCompManageMode ? 'border-emerald-500/60 bg-white text-zinc-900 font-extrabold dark:border-emerald-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
                           {#if isSelected && !isCompManageMode}
                             <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-emerald-500"></span>
@@ -386,25 +389,38 @@
                           </div>
 
                           
+                          
                           <div class="flex items-center gap-1.5 shrink-0 pl-1.5">
                             {#if !isCompManageMode}
                               <div class="flex flex-col items-end gap-1">
-                                <!-- 第一行：对齐左侧主标题，展示彩色挂载点小胶囊 -->
+                                <!-- 象限 2：挂载点微拟态胶囊 -->
                                 <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold {itemMeta.pillClass}">
                                   <span class="w-1 h-1 rounded-full {itemMeta.dotClass}"></span>
                                   <span>{comp.mount_path || 'path'}</span>
                                 </span>
 
-                                <!-- 第二行：对齐左侧浅灰ID，展示琥珀黄版本号 Badge -->
-                                {#if comp.sing_box_version && comp.sing_box_version !== 'universal'}
-                                  <span class="px-1.5 py-0.2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/50 dark:border-amber-800/50 font-mono text-[9px] font-bold">
-                                    v{comp.sing_box_version}
-                                  </span>
-                                {:else}
-                                  <span class="h-3.5"></span>
-                                {/if}
+                                <!-- 象限 4：版本 + 作用范围标签并列，不互斥 -->
+                                
+                                <div class="flex items-center gap-1 font-mono text-[9px]" title={hoverTip || undefined}>
+                                  {#if hasVer}
+                                    <span class="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300/50 dark:border-amber-800/50 font-bold shrink-0">
+                                      v{comp.sing_box_version}
+                                    </span>
+                                  {/if}
+
+                                  {#if hasScope}
+                                    <span class="rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40 px-1 py-0.2 truncate max-w-16 shrink-0">
+                                      {comp.scope_tag}
+                                    </span>
+                                  {/if}
+
+                                  {#if !hasVer && !hasScope}
+                                    <span class="h-3.5"></span>
+                                  {/if}
+                                </div>
                               </div>
                             {:else}
+                        
                               <button title="克隆母版" onclick={() => onCloneComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
                                 <Icon name="copy" size={13} />
                               </button>
