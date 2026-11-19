@@ -360,8 +360,14 @@
                               class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
                             />
                           {/if}
-                          <button onclick={() => { studioActiveCompId = comp.id; }} type="button" class="truncate text-left flex-1 cursor-pointer font-medium">
-                            {comp.name}
+                          <button
+                            onclick={() => { studioActiveCompId = comp.id; }}
+                            type="button"
+                            title={`${comp.name} (${comp.id})`}
+                            class="min-w-0 text-left flex-1 cursor-pointer"
+                          >
+                            <span class="block truncate font-medium">{comp.name}</span>
+                            <span class="block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500">{comp.id}</span>
                           </button>
                         </div>
 

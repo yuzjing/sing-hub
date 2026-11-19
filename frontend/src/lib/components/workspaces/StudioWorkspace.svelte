@@ -424,27 +424,31 @@
             <div class="flex items-start justify-between gap-3 min-w-0 pl-1.5">
               <div class="min-w-0 flex-1 space-y-2">
                 <!-- 第一行：序号徽标单色绝对统一（无论多少组件，始终保持工序严肃感） + 粗体标题 -->
-                <div class="flex items-center gap-2.5 min-w-0">
-                  <span class="flex h-5.5 min-w-7 px-1.5 items-center justify-center rounded-md bg-zinc-900 text-zinc-100 dark:bg-zinc-100 dark:text-zinc-900 font-mono text-[11px] font-black shadow-2xs shrink-0 select-none">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="flex h-5.5 min-w-7 px-1.5 items-center justify-center rounded-md bg-zinc-900 text-zinc-100 dark:bg-zinc-100 dark:text-zinc-900 font-mono text-xs font-black shadow-2xs shrink-0 select-none">
                     {String(idx + 1).padStart(2, '0')}
                   </span>
                   <span class="text-sm font-extrabold text-zinc-900 dark:text-zinc-100 truncate tracking-tight" title={item.module.name}>
                     {item.module.name}
                   </span>
+                  <span class="rounded-md bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 font-mono text-xs text-zinc-500 dark:text-zinc-400 shrink-0">
+                    {item.module.id}
+                  </span>
                 </div>
 
                 <!-- 第二行：微拟态彩色挂载点 + 同色系微拟态母版胶囊 -->
                 <div class="flex items-center gap-2 flex-wrap text-xs">
-                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold tracking-wide {mountMeta.pillClass}">
+                  <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-xs font-mono font-bold tracking-wide {mountMeta.pillClass}">
                     <span class="w-1.5 h-1.5 rounded-full {mountMeta.dotClass}"></span>
                     <span>{item.template?.mount_path || 'path'}</span>
                   </span>
 
                   <span class="text-zinc-300 dark:text-zinc-700 text-xs select-none">›</span>
 
-                  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border text-[10px] font-mono font-semibold truncate max-w-64 {mountMeta.pillClass} bg-opacity-40">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border text-xs font-mono font-semibold truncate max-w-80 {mountMeta.pillClass} bg-opacity-40">
                     <span class="opacity-60">母版:</span>
                     <strong class="font-bold truncate">{item.template?.name || item.module.template_id}</strong>
+                    <span class="opacity-70 shrink-0">({item.module.template_id})</span>
                   </span>
                 </div>
               </div>

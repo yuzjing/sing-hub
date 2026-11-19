@@ -372,13 +372,12 @@
 
                     {#each group.items as mod (mod.id)}
                       {@const isSelected = selectedModule?.id === mod.id}
-                      {@const itemMeta = getMountMeta(mod.template?.mount_path)}
                       <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isModuleManageMode ? 'border-blue-500/60 bg-white text-zinc-900 font-extrabold dark:border-blue-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
                         {#if isSelected && !isModuleManageMode}
                           <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-blue-500"></span>
                         {/if}
 
-                        <div class="flex items-center gap-2 truncate flex-1 pl-1">
+                        <div class="flex items-center gap-2 min-w-0 flex-1 pl-1">
                           {#if isModuleManageMode}
                             <input
                               type="checkbox"
@@ -390,18 +389,19 @@
                               class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
                             />
                           {/if}
-                          <button onclick={() => { activeModuleId = mod.id; }} type="button" class="truncate text-left flex-1 cursor-pointer font-medium">
-                            {mod.name}
+                          <button
+                            onclick={() => { activeModuleId = mod.id; }}
+                            type="button"
+                            title={`${mod.name} (${mod.id})`}
+                            class="min-w-0 text-left flex-1 cursor-pointer"
+                          >
+                            <span class="block truncate font-medium">{mod.name}</span>
+                            <span class="block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500">{mod.id}</span>
                           </button>
                         </div>
 
-                        <!-- 积木右侧直接继承母版的挂载点小胶囊 -->
                         <div class="flex items-center gap-1.5 shrink-0">
                           {#if !isModuleManageMode}
-                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold {itemMeta.pillClass}">
-                              <span class="w-1 h-1 rounded-full {itemMeta.dotClass}"></span>
-                              <span>{mod.template?.mount_path || 'path'}</span>
-                            </span>
                             {#if mod.template?.sing_box_version && mod.template.sing_box_version !== 'universal'}
                               <span class="px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 font-mono text-[9px] font-bold">
                                 v{mod.template.sing_box_version}

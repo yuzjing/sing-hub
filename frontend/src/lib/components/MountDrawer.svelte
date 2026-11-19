@@ -339,6 +339,7 @@
               <div class="space-y-1 min-w-0 flex-1">
                 <span class="text-xs font-bold text-zinc-800 dark:text-zinc-200 block truncate">{mod.name}</span>
                 <div class="flex items-center flex-wrap gap-1.5 text-xs text-zinc-400 font-mono">
+                  <span class="rounded bg-zinc-200/70 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-600 dark:text-zinc-300">{mod.id}</span>
                   <span class="truncate">{mod.template?.name || mod.template_id}</span>
                   {#if mod.template?.mount_path}
                     <span class="rounded bg-zinc-200/60 dark:bg-zinc-800 px-1.5 py-0.5">[{mod.template.mount_path}]</span>
