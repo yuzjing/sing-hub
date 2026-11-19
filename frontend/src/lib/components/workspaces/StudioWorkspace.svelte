@@ -273,52 +273,85 @@
     <div class="flex-1 overflow-y-auto p-3 space-y-2">
       {#each ws.profiles.filter((p: Profile) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (p.tags || []).includes(t))) as p (p.id)}
         {@const isActive = ws.activeProfileId === p.id}
-        <div class="group relative flex items-center justify-between rounded-xl px-3.5 py-3 text-sm transition border shadow-2xs {isActive && !isProfileManageMode ? 'border-amber-400/60 bg-white text-zinc-900 font-extrabold dark:border-amber-500/50 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/50 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
+        <div class="group relative flex flex-col justify-between rounded-xl p-3 text-xs transition border shadow-2xs space-y-2 {isActive && !isProfileManageMode ? 'border-amber-400/70 bg-white text-zinc-900 dark:border-amber-500/60 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
           {#if isActive && !isProfileManageMode}
             <span class="absolute left-0 top-2.5 bottom-2.5 w-1.5 rounded-r-full bg-amber-500 shadow-[0_0_8px_#f59e0b]"></span>
           {/if}
 
-          <div class="flex items-center gap-2.5 truncate flex-1 pl-1.5">
-            {#if isProfileManageMode}
-              <input
-                type="checkbox"
-                checked={selectedProfileIds.includes(p.id)}
-                onchange={(e) => {
-                  if ((e.target as HTMLInputElement).checked) selectedProfileIds = [...selectedProfileIds, p.id];
-                  else selectedProfileIds = selectedProfileIds.filter((id: string) => id !== p.id);
-                }}
-                class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
-              />
-            {/if}
-            <button onclick={() => ws.selectProfile(p.id)} type="button" class="truncate text-left flex-1 cursor-pointer">
-              {p.name}
-            </button>
-            {#if p.sing_box_version && p.sing_box_version !== 'universal'}
-              <span class="ml-1.5 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/50 text-[9px] font-mono font-bold shrink-0">v{p.sing_box_version}</span>
-            {/if}
-          </div>
-
-          <div class="flex items-center gap-1.5 shrink-0">
-            {#if !isProfileManageMode}
-              {#if p.tags && p.tags.length > 0}
-                <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-zinc-100 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-500">#{p.tags[0]}</span>
+          <!-- 第一行：管理勾选框 + 方案名称主标题 + 顶部操作按钮 -->
+          <div class="flex items-center justify-between gap-2 pl-1">
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+              {#if isProfileManageMode}
+                <input
+                  type="checkbox"
+                  checked={selectedProfileIds.includes(p.id)}
+                  onchange={(e) => {
+                    if ((e.target as HTMLInputElement).checked) selectedProfileIds = [...selectedProfileIds, p.id];
+                    else selectedProfileIds = selectedProfileIds.filter((id: string) => id !== p.id);
+                  }}
+                  class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
+                />
               {/if}
-              {#if p.capabilities.enable_subscribe}
-                <button onclick={() => copySubURL(p.token)} type="button" title="复制订阅链接" class="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
-                  <Icon name="link" size={14} />
+              <button
+                onclick={() => ws.selectProfile(p.id)}
+                type="button"
+                title={p.name}
+                class="truncate text-left flex-1 font-bold text-sm tracking-tight cursor-pointer hover:text-amber-600 dark:hover:text-amber-400 transition"
+              >
+                {p.name}
+              </button>
+            </div>
+
+            <!-- 右侧操作栏 -->
+            <div class="flex items-center gap-1 shrink-0">
+              {#if !isProfileManageMode}
+                {#if p.capabilities.enable_subscribe}
+                  <button
+                    onclick={() => copySubURL(p.token)}
+                    type="button"
+                    title="复制此方案订阅链接"
+                    class="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+                  >
+                    <Icon name="link" size={13} />
+                  </button>
+                {/if}
+              {:else}
+                <button title="克隆方案" onclick={() => onCloneProfile(p)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <Icon name="copy" size={13} />
+                </button>
+                <button title="编辑元属性" onclick={() => onEditProfile(p)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <Icon name="pencil" size={13} />
+                </button>
+                <button title="删除方案" onclick={() => triggerConfirm('确认删除方案？', '即将永久删除方案 [' + p.name + ']。', () => ws.batchDeleteProfiles([p.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                  <Icon name="trash" size={13} />
                 </button>
               {/if}
-            {:else}
-              <button title="克隆方案" onclick={() => onCloneProfile(p)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                <Icon name="copy" size={14} />
-              </button>
-              <button title="编辑元属性" onclick={() => onEditProfile(p)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                <Icon name="pencil" size={14} />
-              </button>
-              <button title="删除方案" onclick={() => triggerConfirm('确认删除方案？', '即将永久删除方案 [' + p.name + ']。', () => ws.batchDeleteProfiles([p.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                <Icon name="trash" size={14} />
-              </button>
+            </div>
+          </div>
+
+          <!-- 第二行：方案短ID + 版本Badge + 标签徽标 -->
+          <div class="flex items-center gap-1.5 flex-wrap pl-1 font-mono text-[10px]">
+            <span class="rounded bg-zinc-100 dark:bg-zinc-800/80 px-1.5 py-0.5 text-zinc-400 dark:text-zinc-500 shrink-0">
+              {p.id.slice(0, 14)}
+            </span>
+
+            {#if p.sing_box_version && p.sing_box_version !== 'universal'}
+              <span class="px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/50 font-bold shrink-0">
+                v{p.sing_box_version}
+              </span>
             {/if}
+
+            {#if p.tags && p.tags.length > 0}
+              {#each p.tags.slice(0, 2) as t (t)}
+                <span class="px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-100 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900/40 font-bold shrink-0">
+                  #{t}
+                </span>
+              {/each}
+            {/if}
+
+            <span class="ml-auto text-zinc-400 dark:text-zinc-500 font-sans">
+              {(p.modules || []).length} 积木
+            </span>
           </div>
         </div>
       {:else}

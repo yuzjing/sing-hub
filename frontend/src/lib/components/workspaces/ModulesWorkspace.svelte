@@ -46,6 +46,12 @@
   let collapsedCategories = $state<Record<string, boolean>>({});
   let selectedFilterTags = $state<string[]>([]);
 
+  let collapsedMountGroups = $state<Record<string, boolean>>({});
+
+  function toggleMountGroup(mountKey: string) {
+    collapsedMountGroups[mountKey] = !collapsedMountGroups[mountKey];
+  }
+
   function toggleCategory(catKey: string) {
     collapsedCategories[catKey] = !collapsedCategories[catKey];
   }
@@ -356,71 +362,86 @@
                 <span class="text-xs text-zinc-400 italic px-2 py-2 block text-center">暂无积木</span>
               {:else}
                 {#each subGroups as group (group.mount)}
+                  {@const isGroupCollapsed = collapsedMountGroups[group.mount] === true}
+                  {@const catMountKey = `${cat.key}:${group.mount}`}
                   <div class="space-y-1">
-                    <!-- 二级标头：微拟态彩色胶囊 + 统一柔和计数微标 -->
-                    <div class="flex items-center justify-between px-1.5 py-1">
+                    <!-- 二级标头：改造成可点击折叠的手风琴按钮 -->
+                    <button
+                      onclick={() => toggleMountGroup(catMountKey)}
+                      type="button"
+                      class="w-full flex items-center justify-between px-1.5 py-1 rounded-md hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 transition cursor-pointer select-none text-left"
+                    >
                       <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold tracking-wide {group.meta.pillClass}">
+                        <span class="text-[9px] transform transition-transform duration-200 {collapsedMountGroups[catMountKey] ? '' : 'rotate-90'}">▶</span>
                         <span class="w-1.5 h-1.5 rounded-full {group.meta.dotClass}"></span>
                         <span>{group.meta.label}</span>
                       </span>
 
-                      <!-- 二级小分组数量微标：清晰可读，不再是隐形灰字 -->
+                      <!-- 二级小分组数量微标 -->
                       <span class="inline-flex min-w-4.5 h-4.5 items-center justify-center text-[10px] font-mono font-bold px-1 rounded-md bg-zinc-200/70 border border-zinc-300/60 text-zinc-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300 shadow-2xs">
                         {group.items.length}
                       </span>
-                    </div>
+                    </button>
 
-                    {#each group.items as mod (mod.id)}
-                      {@const isSelected = selectedModule?.id === mod.id}
-                      <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isModuleManageMode ? 'border-blue-500/60 bg-white text-zinc-900 font-extrabold dark:border-blue-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
-                        {#if isSelected && !isModuleManageMode}
-                          <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-blue-500"></span>
-                        {/if}
-
-                        <div class="flex items-center gap-2 min-w-0 flex-1 pl-1">
-                          {#if isModuleManageMode}
-                            <input
-                              type="checkbox"
-                              checked={selectedModuleIds.includes(mod.id)}
-                              onchange={(e) => {
-                                if ((e.target as HTMLInputElement).checked) selectedModuleIds = [...selectedModuleIds, mod.id];
-                                else selectedModuleIds = selectedModuleIds.filter((id: string) => id !== mod.id);
-                              }}
-                              class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
-                            />
+                    {#if !collapsedMountGroups[catMountKey]}
+                      {#each group.items as mod (mod.id)}
+                        {@const isSelected = selectedModule?.id === mod.id}
+                        {@const itemMeta = getMountMeta(mod.template?.mount_path)}
+                        <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isModuleManageMode ? 'border-blue-500/60 bg-white text-zinc-900 font-extrabold dark:border-blue-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
+                          {#if isSelected && !isModuleManageMode}
+                            <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-blue-500"></span>
                           {/if}
-                          <button
-                            onclick={() => { activeModuleId = mod.id; }}
-                            type="button"
-                            title={`${mod.name} (${mod.id})`}
-                            class="min-w-0 text-left flex-1 cursor-pointer"
-                          >
-                            <span class="block truncate font-medium">{mod.name}</span>
-                            <span class="block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500">{mod.id}</span>
-                          </button>
-                        </div>
 
-                        <div class="flex items-center gap-1.5 shrink-0">
-                          {#if !isModuleManageMode}
-                            {#if mod.template?.sing_box_version && mod.template.sing_box_version !== 'universal'}
-                              <span class="px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 font-mono text-[9px] font-bold">
-                                v{mod.template.sing_box_version}
-                              </span>
+                          <div class="flex items-center gap-2 min-w-0 flex-1 pl-1">
+                            {#if isModuleManageMode}
+                              <input
+                                type="checkbox"
+                                checked={selectedModuleIds.includes(mod.id)}
+                                onchange={(e) => {
+                                  if ((e.target as HTMLInputElement).checked) selectedModuleIds = [...selectedModuleIds, mod.id];
+                                  else selectedModuleIds = selectedModuleIds.filter((id: string) => id !== mod.id);
+                                }}
+                                class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
+                              />
                             {/if}
-                          {:else}
-                            <button title="克隆积木" onclick={() => onCloneModule(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                              <Icon name="copy" size={13} />
+                            <button
+                              onclick={() => { activeModuleId = mod.id; }}
+                              type="button"
+                              title={`${mod.name} (${mod.id})`}
+                              class="min-w-0 text-left flex-1 cursor-pointer"
+                            >
+                              <span class="block truncate font-medium">{mod.name}</span>
+                              <span class="block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500">{mod.id}</span>
                             </button>
-                            <button title="编辑元属性" onclick={() => onEditModuleMeta(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                              <Icon name="pencil" size={13} />
-                            </button>
-                            <button title="删除积木" onclick={() => triggerConfirm('删除成品积木？', '将永久删除 [' + mod.name + ']。引用此积木的方案将自动解绑。', () => ws.batchDeleteModules([mod.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                              <Icon name="trash" size={13} />
-                            </button>
-                          {/if}
+                          </div>
+
+                          <!-- 恢复加回的右侧挂载点小胶囊 + 版本号 -->
+                          <div class="flex items-center gap-1.5 shrink-0 pl-1">
+                            {#if !isModuleManageMode}
+                              <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold {itemMeta.pillClass}">
+                                <span class="w-1 h-1 rounded-full {itemMeta.dotClass}"></span>
+                                <span>{mod.template?.mount_path || 'path'}</span>
+                              </span>
+                              {#if mod.template?.sing_box_version && mod.template.sing_box_version !== 'universal'}
+                                <span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[9px] font-bold">
+                                  v{mod.template.sing_box_version}
+                                </span>
+                              {/if}
+                            {:else}
+                              <button title="克隆积木" onclick={() => onCloneModule(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                <Icon name="copy" size={13} />
+                              </button>
+                              <button title="编辑元属性" onclick={() => onEditModuleMeta(mod)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                <Icon name="pencil" size={13} />
+                              </button>
+                              <button title="删除积木" onclick={() => triggerConfirm('删除成品积木？', '将永久删除 [' + mod.name + ']。引用此积木的方案将自动解绑。', () => ws.batchDeleteModules([mod.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                                <Icon name="trash" size={13} />
+                              </button>
+                            {/if}
+                          </div>
                         </div>
-                      </div>
-                    {/each}
+                      {/each}
+                    {/if}
                   </div>
                 {/each}
               {/if}

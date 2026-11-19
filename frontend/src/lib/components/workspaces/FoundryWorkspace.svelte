@@ -44,6 +44,12 @@
 
   let collapsedCategories = $state<Record<string, boolean>>({});
 
+  let collapsedMountGroups = $state<Record<string, boolean>>({});
+
+  function toggleMountGroup(mountKey: string) {
+    collapsedMountGroups[mountKey] = !collapsedMountGroups[mountKey];
+  }
+
   function toggleCategory(catKey: string) {
     collapsedCategories[catKey] = !collapsedCategories[catKey];
   }
@@ -327,71 +333,78 @@
                 <span class="text-xs text-zinc-400 italic px-2 py-2 block text-center">暂无母版</span>
               {:else}
                 {#each subGroups as group (group.mount)}
+                  {@const catMountKey = `${cat.key}:${group.mount}`}
                   <div class="space-y-1">
-                    <!-- 二级标头：微拟态彩色胶囊 + 统一柔和计数微标 -->
-                    <div class="flex items-center justify-between px-1.5 py-1">
+                    <button
+                      onclick={() => toggleMountGroup(catMountKey)}
+                      type="button"
+                      class="w-full flex items-center justify-between px-1.5 py-1 rounded-md hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 transition cursor-pointer select-none text-left"
+                    >
                       <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold tracking-wide {group.meta.pillClass}">
+                        <span class="text-[9px] transform transition-transform duration-200 {collapsedMountGroups[catMountKey] ? '' : 'rotate-90'}">▶</span>
                         <span class="w-1.5 h-1.5 rounded-full {group.meta.dotClass}"></span>
                         <span>{group.meta.label}</span>
                       </span>
 
-                      <!-- 二级小分组数量微标：清晰可读，不再是隐形灰字 -->
                       <span class="inline-flex min-w-4.5 h-4.5 items-center justify-center text-[10px] font-mono font-bold px-1 rounded-md bg-zinc-200/70 border border-zinc-300/60 text-zinc-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300 shadow-2xs">
                         {group.items.length}
                       </span>
-                    </div>
+                    </button>
 
-                    {#each group.items as comp (comp.id)}
-                      {@const isSelected = selectedComp?.id === comp.id}
-                      <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isCompManageMode ? 'border-emerald-500/60 bg-white text-zinc-900 font-extrabold dark:border-emerald-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
-                        {#if isSelected && !isCompManageMode}
-                          <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-emerald-500"></span>
-                        {/if}
-
-                        <div class="flex items-center gap-2 truncate flex-1 pl-1">
-                          {#if isCompManageMode}
-                            <input
-                              type="checkbox"
-                              checked={selectedCompIds.includes(comp.id)}
-                              onchange={(e) => {
-                                if ((e.target as HTMLInputElement).checked) selectedCompIds = [...selectedCompIds, comp.id];
-                                else selectedCompIds = selectedCompIds.filter((id: string) => id !== comp.id);
-                              }}
-                              class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
-                            />
+                    {#if !collapsedMountGroups[catMountKey]}
+                      {#each group.items as comp (comp.id)}
+                        {@const isSelected = selectedComp?.id === comp.id}
+                        <div class="group relative flex items-center justify-between rounded-xl px-3 py-2 text-xs transition border shadow-2xs {isSelected && !isCompManageMode ? 'border-emerald-500/60 bg-white text-zinc-900 font-extrabold dark:border-emerald-500/40 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
+                          {#if isSelected && !isCompManageMode}
+                            <span class="absolute left-0 top-2 bottom-2 w-1.5 rounded-r-full bg-emerald-500"></span>
                           {/if}
-                          <button
-                            onclick={() => { studioActiveCompId = comp.id; }}
-                            type="button"
-                            title={`${comp.name} (${comp.id})`}
-                            class="min-w-0 text-left flex-1 cursor-pointer"
-                          >
-                            <span class="block truncate font-medium">{comp.name}</span>
-                            <span class="block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500">{comp.id}</span>
-                          </button>
-                        </div>
 
-                        <div class="flex items-center gap-1.5 shrink-0">
-                          {#if !isCompManageMode}
-                            {#if comp.sing_box_version && comp.sing_box_version !== 'universal'}
-                              <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[9px] font-bold">
-                                v{comp.sing_box_version}
-                              </span>
+                          <div class="flex items-center gap-2 truncate flex-1 pl-1">
+                            {#if isCompManageMode}
+                              <input
+                                type="checkbox"
+                                checked={selectedCompIds.includes(comp.id)}
+                                onchange={(e) => {
+                                  if ((e.target as HTMLInputElement).checked) selectedCompIds = [...selectedCompIds, comp.id];
+                                  else selectedCompIds = selectedCompIds.filter((id: string) => id !== comp.id);
+                                }}
+                                class="rounded h-3.5 w-3.5 cursor-pointer shrink-0"
+                              />
                             {/if}
-                          {:else}
-                            <button title="克隆母版" onclick={() => onCloneComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
-                              <Icon name="copy" size={13} />
+                            <button
+                              onclick={() => { studioActiveCompId = comp.id; }}
+                              type="button"
+                              title={`${comp.name} (${comp.id})`}
+                              class="min-w-0 text-left flex-1 cursor-pointer"
+                            >
+                              <span class="block truncate font-medium">{comp.name}</span>
+                              <span class="block truncate font-mono text-xs text-zinc-400 dark:text-zinc-500">{comp.id}</span>
                             </button>
-                            <button title="编辑元属性" onclick={() => onEditComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
-                              <Icon name="pencil" size={13} />
-                            </button>
-                            <button title="删除母版" onclick={() => triggerConfirm('确认删除母版？', '将永久删除母版 [' + comp.name + ']。所有引用此母版的成品积木也会被删除。', () => ws.batchDeleteComponents([comp.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
-                              <Icon name="trash" size={13} />
-                            </button>
-                          {/if}
+                          </div>
+
+                          <div class="flex items-center gap-1.5 shrink-0">
+                            {#if !isCompManageMode}
+                              {#if comp.sing_box_version && comp.sing_box_version !== 'universal'}
+                                <span class="px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono text-[9px] font-bold">
+                                  v{comp.sing_box_version}
+                                </span>
+                              {/if}
+                            {:else}
+                              <button title="克隆母版" onclick={() => onCloneComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
+                                <Icon name="copy" size={13} />
+                              </button>
+                              <button title="编辑元属性" onclick={() => onEditComponent(comp)} type="button" class="text-zinc-400 hover:text-blue-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
+                                <Icon name="pencil" size={13} />
+                              </button>
+                              <button title="删除母版" onclick={() => triggerConfirm('确认删除母版？', '将永久删除母版 [' + comp.name + ']。所有引用此母版的成品积木也会被删除。', () => ws.batchDeleteComponents([comp.id]))} type="button" class="text-zinc-400 hover:text-rose-600 cursor-pointer p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition">
+                                <Icon name="trash" size={13} />
+                              </button>
+                            {/if}
+                          </div>
                         </div>
-                      </div>
-                    {/each}
+                      {/each}
+                    
+                    {/if}
                   </div>
                 {/each}
               {/if}
