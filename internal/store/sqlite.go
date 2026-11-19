@@ -479,10 +479,7 @@ func (s *Store) SaveProfile(ctx context.Context, p model.Profile) error {
 
 	for idx, b := range p.Modules {
 		bindID := fmt.Sprintf("bind-%s-%s-%d", p.ID, b.ModuleID, idx)
-		order := b.OrderIndex
-		if order == 0 {
-			order = idx + 1
-		}
+		order := idx + 1
 		if _, err := tx.ExecContext(ctx, "INSERT INTO profile_modules (id, profile_id, module_id, order_index) VALUES (?, ?, ?, ?)",
 			bindID, p.ID, b.ModuleID, order); err != nil {
 			return err
