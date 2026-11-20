@@ -180,7 +180,9 @@
         <!-- 部署策略与凭据面板 -->
         <div class="rounded-xl border border-blue-200/60 bg-blue-50/30 p-3.5 dark:border-blue-900/40 dark:bg-blue-950/20 space-y-3">
           <div class="flex items-center justify-between border-b border-blue-100 pb-2 dark:border-blue-900/50">
-            <span class="font-bold text-blue-800 dark:text-blue-300 text-sm">SSH 自动化运维与推送策略</span>
+            <span class="font-bold text-blue-800 dark:text-blue-300 text-sm">
+              {deployStrategy === 'local_file' ? '本地挂载直写策略 (零 SSH)' : 'SSH 自动化运维与推送策略'}
+            </span>
             <div class="flex items-center gap-4">
               <label class="flex items-center gap-1.5 cursor-pointer text-blue-800 dark:text-blue-300 font-medium">
                 <input type="checkbox" bind:checked={enablePing} class="rounded" /> 开启测活
@@ -198,40 +200,50 @@
                 <option value="systemd">原生 Systemd 服务</option>
                 <option value="podman">Podman 容器</option>
                 <option value="docker">Docker 容器</option>
+                <option value="local_file">本地挂载直写</option>
                 <option value="standalone">仅二进制测试 (不重启)</option>
               </select>
             </label>
-            <label class="block">
-              <span class="block text-[11px] text-zinc-600 dark:text-zinc-400 mb-1">目标服务名 / 容器名</span>
-              <input bind:value={serviceName} placeholder="如: sing-box" class="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-            </label>
+            {#if deployStrategy !== 'local_file'}
+              <label class="block">
+                <span class="block text-xs text-zinc-600 dark:text-zinc-400 mb-1">目标服务名 / 容器名</span>
+                <input bind:value={serviceName} placeholder="如: sing-box" class="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </label>
+            {/if}
           </div>
 
-          <div class="grid grid-cols-3 gap-2.5">
-            <label class="block">
-              <span class="block text-[11px] text-zinc-500 mb-1">SSH 主机 / IP</span>
-              <input bind:value={sshHost} placeholder="留空使用主端点" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
-            </label>
-            <label class="block">
-              <span class="block text-[11px] text-zinc-500 mb-1">SSH 用户</span>
-              <input bind:value={sshUser} placeholder="root" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
-            </label>
-            <label class="block">
-              <span class="block text-[11px] text-zinc-500 mb-1">SSH 端口</span>
-              <input type="number" bind:value={sshPort} placeholder="22" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
-            </label>
-          </div>
+          {#if deployStrategy !== 'local_file'}
+            <div class="grid grid-cols-3 gap-2.5">
+              <label class="block">
+                <span class="block text-xs text-zinc-500 mb-1">SSH 主机 / IP</span>
+                <input bind:value={sshHost} placeholder="留空使用主端点" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
+              </label>
+              <label class="block">
+                <span class="block text-xs text-zinc-500 mb-1">SSH 用户</span>
+                <input bind:value={sshUser} placeholder="root" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
+              </label>
+              <label class="block">
+                <span class="block text-xs text-zinc-500 mb-1">SSH 端口</span>
+                <input type="number" bind:value={sshPort} placeholder="22" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
+              </label>
+            </div>
 
-          <div class="grid grid-cols-2 gap-2.5">
+            <div class="grid grid-cols-2 gap-2.5">
+              <label class="block">
+                <span class="block text-xs text-zinc-500 mb-1">SSH 认证私钥路径</span>
+                <input bind:value={keyPath} placeholder="~/.ssh/id_rsa" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
+              </label>
+              <label class="block">
+                <span class="block text-xs text-zinc-500 mb-1">远端配置文件下发路径</span>
+                <input bind:value={remotePath} placeholder="~/.config/sing-box/config.json" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
+              </label>
+            </div>
+          {:else}
             <label class="block">
-              <span class="block text-[11px] text-zinc-500 mb-1">SSH 认证私钥路径</span>
-              <input bind:value={keyPath} placeholder="~/.ssh/id_rsa" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
+              <span class="block text-xs text-zinc-500 mb-1">Sing-Hub 容器内挂载写入路径 (示例: /mnt/nas-singbox/config.json)</span>
+              <input bind:value={remotePath} placeholder="/mnt/nas-singbox/config.json" class="w-full rounded border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
             </label>
-            <label class="block">
-              <span class="block text-[11px] text-zinc-500 mb-1">远端配置文件下发路径</span>
-              <input bind:value={remotePath} placeholder="~/.config/sing-box/config.json" class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950" />
-            </label>
-          </div>
+          {/if}
         </div>
 
         <div class="grid grid-cols-2 gap-3">

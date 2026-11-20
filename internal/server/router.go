@@ -346,10 +346,29 @@ func (s *Server) handleDeployDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	configBytes, _, _, err := s.assembler.Assemble(r.Context(), dev.TargetProfileID)
+	configBytes, _, report, err := s.assembler.Assemble(r.Context(), dev.TargetProfileID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("assemble error: %v", err)})
 		return
+	}
+
+	if dev.DeployStrategy == "local_file" && report.Enabled {
+		anyChecked := report.Stable != nil || report.Alpha != nil
+		anyValid := (report.Stable != nil && report.Stable.Valid) || (report.Alpha != nil && report.Alpha.Valid)
+		if anyChecked && !anyValid {
+			var lintErrs strings.Builder
+			if report.Stable != nil {
+				fmt.Fprintf(&lintErrs, "[Stable] %s\n", report.Stable.Output)
+			}
+			if report.Alpha != nil {
+				fmt.Fprintf(&lintErrs, "[Alpha] %s\n", report.Alpha.Output)
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]any{
+				"error": "本地内核预检未通过，已熔断写入",
+				"logs":  "[+] 预检熔断: 配置未通过官方 Sing-box 语法校验\n" + lintErrs.String(),
+			})
+			return
+		}
 	}
 
 	timeoutSec := 10
@@ -365,8 +384,17 @@ func (s *Server) handleDeployDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 若为 local_file 且控制面刚通过校验，借用校验内核版本号回填，保持 UI 版本匹配徽标一致
+	if dev.DeployStrategy == "local_file" {
+		if report.Alpha != nil && report.Alpha.Valid {
+			result.RemoteVersion = report.Alpha.Version
+		} else if report.Stable != nil && report.Stable.Valid {
+			result.RemoteVersion = report.Stable.Version
+		}
+	}
+
 	// 更新数据库中该节点的最新远端版本记录
-	if result.RemoteVersion != "" && result.RemoteVersion != "Unknown" && result.RemoteVersion != "待同步探测" && result.RemoteVersion != dev.LastRemoteVer {
+	if result.RemoteVersion != "" && result.RemoteVersion != "Unknown" && result.RemoteVersion != "待同步探测" && result.RemoteVersion != "local_file" && result.RemoteVersion != dev.LastRemoteVer {
 		dev.LastRemoteVer = result.RemoteVersion
 		_ = s.store.SaveDevice(r.Context(), *dev)
 	}

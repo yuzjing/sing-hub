@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -249,6 +250,9 @@ func buildStrategyPlan(strategy, svc, envPrefix, tempPath string) strategyPlan {
 }
 
 func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (DeployResult, error) {
+	if d.DeployStrategy == "local_file" {
+		return deployLocalFile(d, configJSON)
+	}
 	var res DeployResult
 	var logs strings.Builder
 
@@ -446,4 +450,98 @@ func DeployConfig(d model.Device, configJSON []byte, timeout time.Duration) (Dep
 	res.Logs = logs.String()
 	return res, nil
 
+}
+
+func deployLocalFile(d model.Device, configJSON []byte) (DeployResult, error) {
+	var res DeployResult
+	var logs strings.Builder
+
+	logStep := func(step string) {
+		logs.WriteString(fmt.Sprintf("\n[+] %s\n", step))
+	}
+	logOut := func(out string) {
+		if strings.TrimSpace(out) != "" {
+			logs.WriteString(fmt.Sprintf("%s\n", strings.TrimSpace(out)))
+		}
+	}
+
+	targetPath := strings.TrimSpace(d.RemotePath)
+	if targetPath == "" || strings.HasPrefix(targetPath, "~") {
+		res.Logs = logs.String()
+		return res, fmt.Errorf("local_file 策略必须填写容器内绝对挂载路径（如 /mnt/nas-singbox/config.json）")
+	}
+	targetPath = filepath.Clean(targetPath)
+	targetDir := filepath.Dir(targetPath)
+
+	logStep("阶段 1: 校验本地挂载目录与写权限...")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		logOut(err.Error())
+		res.Logs = logs.String()
+		return res, fmt.Errorf("创建目标目录失败: %w", err)
+	}
+	logOut(fmt.Sprintf("目标路径就绪: %s", targetPath))
+
+	logStep("阶段 2: 写入临时文件并执行原子替换 (Atomic Rename)...")
+	tmpFile, err := os.CreateTemp(targetDir, ".config.json.tmp.*")
+	if err != nil {
+		logOut(err.Error())
+		res.Logs = logs.String()
+		return res, fmt.Errorf("创建临时文件失败（请检查容器挂载卷是否可写）: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	var renamed bool
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.Write(configJSON); err != nil {
+		_ = tmpFile.Close()
+		res.Logs = logs.String()
+		return res, fmt.Errorf("写入配置失败: %w", err)
+	}
+	// 显式赋予 0644 权限，防止 os.CreateTemp 默认 0600 导致同机 sing-box 容器只读无法读取
+	if err := tmpFile.Chmod(0644); err != nil {
+		_ = tmpFile.Close()
+		res.Logs = logs.String()
+		return res, fmt.Errorf("设置文件权限失败: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		res.Logs = logs.String()
+		return res, fmt.Errorf("落盘刷写失败: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		res.Logs = logs.String()
+		return res, fmt.Errorf("关闭临时文件失败: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		res.Logs = logs.String()
+		return res, fmt.Errorf("原子替换正式配置失败: %w", err)
+	}
+	renamed = true
+	logOut("配置文件已完成原子覆写 ✓")
+
+	logStep("阶段 3: 本地物理文件 SHA256 核验...")
+	writtenBytes, err := os.ReadFile(targetPath)
+	if err != nil {
+		res.Logs = logs.String()
+		return res, fmt.Errorf("回读目标文件失败: %w", err)
+	}
+	localSHA := fmt.Sprintf("%x", sha256.Sum256(configJSON))
+	diskSHA := fmt.Sprintf("%x", sha256.Sum256(writtenBytes))
+	if localSHA != diskSHA {
+		res.Logs = logs.String()
+		return res, fmt.Errorf("物理文件 SHA256 与编译快照不一致")
+	}
+
+	logOut(fmt.Sprintf("校验和完美匹配: %s", diskSHA[:8]))
+	logOut("提示: 若宿主机已配置 systemd PathChanged 监听，sing-box 将自动完成重载。")
+	res.Success = true
+	res.VerifiedHash = diskSHA[:8]
+	res.RemoteVersion = "local_file"
+	res.Logs = logs.String()
+	return res, nil
 }

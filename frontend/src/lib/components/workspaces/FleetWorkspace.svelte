@@ -349,8 +349,14 @@
                   </div>
 
                   <div class="space-y-1.5">
-                    <span class="text-zinc-500 font-bold text-xs uppercase tracking-wider block">SSH 部署凭据</span>
-                    {#if dev.ssh_host || dev.endpoints.length > 0}
+                    <span class="text-zinc-500 font-bold text-xs uppercase tracking-wider block">
+                      {dev.deploy_strategy === 'local_file' ? '本地投递模式' : 'SSH 部署凭据'}
+                    </span>
+                    {#if dev.deploy_strategy === 'local_file'}
+                      <div class="w-full rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/70 dark:border-emerald-900/50 px-3 py-1.5 text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400 shadow-2xs truncate">
+                        本地挂载直写 (零 SSH 隔离)
+                      </div>
+                    {:else if dev.ssh_host || dev.endpoints.length > 0}
                       <div class="w-full rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs font-mono font-bold text-zinc-800 dark:text-zinc-300 shadow-2xs truncate" title="{dev.ssh_user}@{dev.ssh_host || dev.endpoints[0]}:{dev.ssh_port}">
                         {dev.ssh_user}@{dev.ssh_host || dev.endpoints[0]}:{dev.ssh_port}
                       </div>
