@@ -2,6 +2,8 @@
 <script lang="ts">
   import { ws } from '$lib/workspace.svelte';
   import Icon from '$lib/components/Icon.svelte';
+  import CodeEditor from '$lib/components/CodeEditor.svelte';
+  import type { Device } from '$lib/types';
 
   interface Props {
     templateVars?: string[];
@@ -20,6 +22,13 @@
   let searchFilter = $state('');
   let activeMenuVar = $state<string | null>(null);
   let menuStyle = $state('');
+
+  // 高级长文本 / 复合 JSON 编辑沙箱弹窗状态
+  let isModalOpen = $state(false);
+  let activeModalVar = $state('');
+  let modalDraftText = $state('');
+  let modalFormatError = $state('');
+  let modalEditorRef = $state<{ insertAtCursor: (snippet: string) => void } | null>(null);
 
   let fieldMap = $derived.by(() => {
     const mapping: Record<string, string> = {};
@@ -83,6 +92,56 @@
     params[varKey] = parsed;
     onChange();
   }
+
+  // 打开全功能代码沙箱弹窗
+  function openCodeModal(v: string) {
+    activeModalVar = v;
+    modalFormatError = '';
+    const raw = params[v];
+    if (typeof raw === 'object' && raw !== null) {
+      modalDraftText = JSON.stringify(raw, null, 2);
+    } else {
+      const s = String(raw ?? '');
+      // 尝试美化现存的单行 JSON
+      const trimmed = s.trim();
+      if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+        try {
+          modalDraftText = JSON.stringify(JSON.parse(trimmed), null, 2);
+        } catch {
+          modalDraftText = s;
+        }
+      } else {
+        modalDraftText = s;
+      }
+    }
+    isModalOpen = true;
+  }
+
+  // 一键格式化与排版校验
+  function formatModalJSON() {
+    try {
+      const parsed = JSON.parse(modalDraftText);
+      modalDraftText = JSON.stringify(parsed, null, 2);
+      modalFormatError = '';
+    } catch (e: unknown) {
+      modalFormatError = e instanceof Error ? e.message : 'JSON 格式有误，无法自动排版';
+    }
+  }
+
+  // 将节点引用精准插入当前编辑器光标位置 (解决多条引用痛点)
+  function insertRefAtCursor(refExpr: string) {
+    if (modalEditorRef) {
+      modalEditorRef.insertAtCursor(`"${refExpr}"`);
+    } else {
+      modalDraftText += `"${refExpr}"`;
+    }
+  }
+
+  // 提交沙箱编辑
+  function commitModal() {
+    handleInputChange(activeModalVar, modalDraftText);
+    isModalOpen = false;
+  }
 </script>
 
 <div class="space-y-3.5">
@@ -100,17 +159,17 @@
   {#if filteredVars.length === 0}
     <div class="text-sm text-zinc-500 italic py-6 text-center">无匹配的参数插孔。</div>
   {:else}
-    <!-- 优化栅格：在流式容器内自适应，避免小屏下被硬分 2 列挤爆 -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-h-104 overflow-y-auto pr-1">
       {#each filteredVars as v (v)}
         {@const rawParam = params[v]}
         {@const curVal = typeof rawParam === 'object' && rawParam !== null ? JSON.stringify(rawParam) : String(rawParam ?? '')}
         {@const isRef = typeof rawParam === 'string' && rawParam.startsWith('@node:')}
+        {@const isComplex = typeof rawParam === 'object' || curVal.startsWith('[') || curVal.startsWith('{') || curVal.length > 40}
         {@const targetField = fieldMap[v]}
 
         <div class="rounded-xl border border-zinc-200/80 bg-white p-3 shadow-xs dark:border-zinc-800 dark:bg-zinc-950/80 space-y-2 transition-all hover:border-blue-300 dark:hover:border-blue-800">
           <div class="flex items-center justify-between gap-2">
-            <!-- 左侧：复合标签，即使在窄容器内也自动换行或舒展，绝不折断成省略号 -->
+            <!-- 字段标签 -->
             <div class="flex items-center gap-1.5 flex-wrap min-w-0 flex-1">
               {#if targetField}
                 <span class="rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-mono text-[11px] font-bold px-1.5 py-0.5 shrink-0 border border-blue-100 dark:border-blue-900/50">
@@ -121,23 +180,38 @@
               <span class="text-xs font-mono font-bold text-zinc-700 dark:text-zinc-300 truncate" title={v}>.{v}</span>
             </div>
 
-            <!-- 右侧：26px 紧凑单图标按钮 -->
-            <button
-              onclick={(e) => toggleMenu(v, e)}
-              type="button"
-              title={isRef ? '已绑定节点属性，点击切换' : '点击引用设备节点属性 (@node:...)'}
-              class="flex h-6.5 w-6.5 items-center justify-center rounded-lg transition cursor-pointer shrink-0 shadow-2xs {isRef ? 'bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-400 dark:border-blue-800' : 'bg-zinc-100 text-zinc-500 hover:text-amber-600 hover:bg-amber-50 dark:bg-zinc-800/80 dark:text-zinc-400 dark:hover:bg-amber-950/40 dark:hover:text-amber-300 border border-transparent'}"
-            >
-              <span class="text-xs leading-none">{isRef ? '🔗' : '⚡'}</span>
-            </button>
+            <!-- 右侧操作栏：新增展开编辑沙箱 ⤢ 按钮 + 闪电快速引用 ⚡ -->
+            <div class="flex items-center gap-1 shrink-0">
+              <button
+                onclick={() => openCodeModal(v)}
+                type="button"
+                title="打开全功能代码编辑沙箱 (适合长文本、数组、复杂 JSON 及多重节点引用)"
+                class="flex h-6.5 px-1.5 items-center justify-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 text-[11px] font-mono text-zinc-600 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-400 dark:hover:bg-blue-950/40 dark:hover:text-blue-300 transition cursor-pointer shadow-2xs"
+              >
+                <span>⤢</span>
+                {#if isComplex}
+                  <span class="text-[9px] font-bold text-blue-600 dark:text-blue-400">JSON</span>
+                {/if}
+              </button>
+
+              <button
+                onclick={(e) => toggleMenu(v, e)}
+                type="button"
+                title={isRef ? '已绑定节点属性，点击切换' : '点击单值引用设备节点属性 (@node:...)'}
+                class="flex h-6.5 w-6.5 items-center justify-center rounded-lg transition cursor-pointer shrink-0 shadow-2xs {isRef ? 'bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-400 dark:border-blue-800' : 'bg-zinc-100 text-zinc-500 hover:text-amber-600 hover:bg-amber-50 dark:bg-zinc-800/80 dark:text-zinc-400 dark:hover:bg-amber-950/40 dark:hover:text-amber-300 border border-transparent'}"
+              >
+                <span class="text-xs leading-none">{isRef ? '🔗' : '⚡'}</span>
+              </button>
+            </div>
           </div>
 
+          <!-- 单行输入框 (若超长可随时点击 ⤢ 进入弹窗) -->
           <div class="relative">
             <input
               value={curVal}
               oninput={(e) => handleInputChange(v, (e.target as HTMLInputElement).value)}
-              placeholder=""
-              class="w-full rounded-lg border {isRef ? 'border-blue-400/80 bg-blue-50/20 text-blue-700 dark:border-blue-800 dark:text-blue-300 font-bold' : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100'} px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 transition shadow-2xs"
+              placeholder={isComplex ? '复杂结构，建议点击右上角 ⤢ 展开编辑' : ''}
+              class="w-full rounded-lg border {isRef ? 'border-blue-400/80 bg-blue-50/20 text-blue-700 dark:border-blue-800 dark:text-blue-300 font-bold' : isComplex ? 'border-zinc-300 dark:border-zinc-700 bg-zinc-50/40 dark:bg-zinc-900/40 font-mono text-blue-600 dark:text-blue-400' : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100'} px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 transition shadow-2xs"
             />
           </div>
         </div>
@@ -146,6 +220,9 @@
   {/if}
 </div>
 
+<!-- ============================================================================== -->
+<!-- 1. 单值快速覆盖引用菜单 (原 ⚡ 浮层)                                           -->
+<!-- ============================================================================== -->
 {#if activeMenuVar}
   {@const targetVar = activeMenuVar}
   <button type="button" tabindex="-1" aria-label="关闭引用菜单" class="fixed inset-0 z-50 bg-transparent cursor-default border-none p-0 w-full h-full" onclick={() => activeMenuVar = null}></button>
@@ -154,7 +231,7 @@
     <div>
       <span class="text-xs font-bold text-zinc-500 uppercase tracking-wider block px-1.5 mb-2 items-center gap-1.5">
         <Icon name="server" size={14} color="blue" />
-        <span>选择网络节点的端点或属性</span>
+        <span>一键覆盖单值引用 (复杂结构请用 ⤢)</span>
       </span>
 
       {#if ws.devices.length === 0}
@@ -197,5 +274,125 @@
         </button>
       </div>
     {/if}
+  </div>
+{/if}
+
+<!-- ============================================================================== -->
+<!-- 2. 全功能复合参数代码编辑沙箱 (支持光标位置精确插入 @node 属性)                 -->
+<!-- ============================================================================== -->
+{#if isModalOpen}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+    <div class="w-full max-w-3xl rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 flex flex-col space-y-3.5 max-h-[90vh]">
+      
+      <!-- 头部：标题与格式化操作 -->
+      <div class="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800 shrink-0">
+        <div class="flex items-center gap-2">
+          <Icon name="sliders" color="blue" size={17} />
+          <h3 class="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+            高级参数编辑: <span class="font-mono text-blue-600 dark:text-blue-400">.{activeModalVar}</span>
+          </h3>
+          {#if fieldMap[activeModalVar]}
+            <span class="text-xs text-zinc-400 font-mono">(目标字段: "{fieldMap[activeModalVar]}")</span>
+          {/if}
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button
+            onclick={formatModalJSON}
+            type="button"
+            class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/60 cursor-pointer shadow-2xs transition flex items-center gap-1.5"
+          >
+            <span>✨ 格式化 JSON</span>
+          </button>
+          <button onclick={() => isModalOpen = false} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+            <Icon name="close" size={15} />
+          </button>
+        </div>
+      </div>
+
+      {#if modalFormatError}
+        <div class="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 text-xs font-mono border border-rose-200 dark:border-rose-900/40 shrink-0">
+          ⚠️ {modalFormatError}
+        </div>
+      {/if}
+
+      <!-- 中部主编辑区：直接调用现成的 CodeEditor -->
+      <div class="h-72 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950 shrink-0">
+        <CodeEditor
+          bind:this={modalEditorRef}
+          value={modalDraftText}
+          dark={ws.isDark}
+          onChange={(newVal: string) => {
+            modalDraftText = newVal;
+          }}
+        />
+      </div>
+
+      <!-- 底部节点属性注入托盘：光标位置精确插入 (彻底解决多条引用痛点) -->
+      <div class="rounded-xl border border-blue-200/60 bg-blue-50/30 p-3 dark:border-blue-900/40 dark:bg-blue-950/20 space-y-2 flex-1 min-h-0 flex flex-col">
+        <div class="flex items-center justify-between shrink-0">
+          <span class="text-xs font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1">
+            <Icon name="server" size={13} color="blue" />
+            <span>点击向当前编辑器光标位置插入属性 (可连续插入多条):</span>
+          </span>
+          <span class="text-[11px] text-zinc-400 font-mono">自动添加双引号安全包裹</span>
+        </div>
+
+        {#if ws.devices.length === 0}
+          <span class="text-xs text-zinc-400 italic">暂无可用节点</span>
+        {:else}
+          <div class="overflow-y-auto space-y-2 pr-1 max-h-32">
+            {#each ws.devices as dev (dev.id)}
+              <div class="flex items-center gap-1.5 flex-wrap text-xs font-mono">
+                <span class="font-bold text-zinc-700 dark:text-zinc-300 shrink-0 bg-white dark:bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-800">
+                  {dev.name}:
+                </span>
+                {#if dev.props && dev.props.length > 0}
+                  {#each dev.props as p (p.key)}
+                    <button
+                      onclick={() => insertRefAtCursor(`@node:${dev.id}.${p.key}`)}
+                      type="button"
+                      title={`插入 "@node:${dev.id}.${p.key}"`}
+                      class="px-2 py-0.5 rounded-md bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300 hover:bg-blue-600 hover:text-white transition cursor-pointer shadow-2xs truncate max-w-48"
+                    >
+                      +{p.label || p.key}
+                    </button>
+                  {/each}
+                {:else}
+                  {#each dev.endpoints as ep, i (i)}
+                    <button
+                      onclick={() => insertRefAtCursor(`@node:${dev.id}.endpoints[${i}]`)}
+                      type="button"
+                      class="px-2 py-0.5 rounded-md bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300 hover:bg-blue-600 hover:text-white transition cursor-pointer shadow-2xs"
+                    >
+                      +端点{i + 1}
+                    </button>
+                  {/each}
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <!-- 底部控制按钮 -->
+      <div class="flex justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800 shrink-0">
+        <button
+          onclick={() => isModalOpen = false}
+          type="button"
+          class="rounded-lg border border-zinc-300 px-4 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 cursor-pointer"
+        >
+          取消
+        </button>
+        <button
+          onclick={commitModal}
+          type="button"
+          class="rounded-lg bg-blue-600 px-5 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 cursor-pointer shadow-sm transition"
+        >
+          应用并回写
+        </button>
+      </div>
+
+    </div>
   </div>
 {/if}
