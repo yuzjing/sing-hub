@@ -31,6 +31,7 @@
   let tempRemotePath = $state('');
   let expandedPropDevIds = $state<string[]>([]);
   let selectedFilterTags = $state<string[]>([]);
+  let filterMode = $state<'and' | 'or'>('and');
 
   let deployLogs = $state('');
   let deployStatus = $state<'running'|'success'|'error'>('running');
@@ -44,10 +45,14 @@
     return Array.from(tags);
   });
 
-  let filteredDevices = $derived.by(() => {
-    return ws.devices.filter((dev: Device) => 
-      selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (dev.tags || []).includes(t))
-    );
+   let filteredDevices = $derived.by(() => {
+    if (selectedFilterTags.length === 0) return ws.devices;
+    return ws.devices.filter((dev: Device) => {
+      const list = dev.tags || [];
+      return filterMode === 'and'
+        ? selectedFilterTags.every((t: string) => list.includes(t))
+        : selectedFilterTags.some((t: string) => list.includes(t));
+    });
   });
 
   let filteredDeviceIds = $derived.by(() => filteredDevices.map((d: Device) => d.id));
@@ -158,7 +163,7 @@
         </label>
       {/if}
       <div class="w-64">
-        <TagFilter {availableTags} bind:selectedTags={selectedFilterTags} borderless={true} />
+        <TagFilter {availableTags} bind:selectedTags={selectedFilterTags} bind:matchMode={filterMode} borderless={true} />
       </div>
       <div class="text-xs font-mono text-zinc-500 font-semibold border-l border-zinc-200 dark:border-zinc-800 pl-4">
         显示: {filteredDevices.length} / {ws.devices.length} 台

@@ -45,6 +45,15 @@
 
   let collapsedCategories = $state<Record<string, boolean>>({});
   let selectedFilterTags = $state<string[]>([]);
+  let filterMode = $state<'and' | 'or'>('and');
+
+  function matchItemTags(tags: string[] | undefined): boolean {
+    if (selectedFilterTags.length === 0) return true;
+    const list = tags || [];
+    return filterMode === 'and'
+      ? selectedFilterTags.every((t: string) => list.includes(t))
+      : selectedFilterTags.some((t: string) => list.includes(t));
+  }
 
   let collapsedMountGroups = $state<Record<string, boolean>>({});
 
@@ -69,7 +78,7 @@
 
   let allFilteredModuleIds = $derived.by(() => {
     return ws.modules
-      .filter((m: Module) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (m.tags || []).includes(t)))
+      .filter((m: Module) => matchItemTags(m.tags))
       .map((m: Module) => m.id);
   });
 
@@ -296,7 +305,7 @@
     </div>
 
     <!-- 标签多选筛选 -->
-    <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} />
+    <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} bind:matchMode={filterMode} />
 
     {#if isModuleManageMode}
       <div class="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-amber-50/70 dark:bg-amber-950/20 px-4 py-2 text-xs">
@@ -321,7 +330,7 @@
 
     <div class="flex-1 overflow-y-auto p-3 space-y-4">
       {#each CATEGORIES as cat (cat.key)}
-        {@const filteredModules = ws.modules.filter((m: Module) => m.category === cat.key && (selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (m.tags || []).includes(t))))}
+        {@const filteredModules = ws.modules.filter((m: Module) => m.category === cat.key && matchItemTags(m.tags))}
         {@const isCollapsed = collapsedCategories[cat.key] === true}
         {@const subGroups = groupModulesByMount(filteredModules)}
         {@const catIds = filteredModules.map((m: Module) => m.id)}

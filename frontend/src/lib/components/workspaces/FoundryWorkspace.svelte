@@ -66,6 +66,15 @@
   let editorRef = $state<{ insertAtCursor: (snippet: string) => void } | null>(null);
 
   let selectedFilterTags = $state<string[]>([]);
+  let filterMode = $state<'and' | 'or'>('and');
+
+  function matchScopeTags(scopeTag: string | undefined): boolean {
+    if (selectedFilterTags.length === 0) return true;
+    const tags = (scopeTag || '').split(/[,，\s]+/).map((s: string) => s.trim()).filter(Boolean);
+    return filterMode === 'and'
+      ? selectedFilterTags.every((t: string) => tags.includes(t))
+      : selectedFilterTags.some((t: string) => tags.includes(t));
+  }
   let tagCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
     ws.components.forEach((c: Component) => {
@@ -96,7 +105,7 @@
   let detectedVars = $derived.by(() => extractAllVars(studioTmplCode));
   let allFilteredCompIds = $derived.by(() => {
     return ws.components
-      .filter((c: Component) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (c.scope_tag || '').includes(t)))
+      .filter((c: Component) => matchScopeTags(c.scope_tag))
       .map((c: Component) => c.id);
   });
 
@@ -266,7 +275,7 @@
     </div>
 
     <!-- 标签多选筛选 -->
-    <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} />
+    <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} bind:matchMode={filterMode} />
 
     {#if isCompManageMode}
       <div class="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-amber-50/70 dark:bg-amber-950/20 px-4 py-2 text-xs">
@@ -292,7 +301,7 @@
     <!-- 现代手风琴卡片分组 -->
     <div class="flex-1 overflow-y-auto p-3 space-y-4">
       {#each CATEGORIES as cat (cat.key)}
-        {@const filteredComps = ws.components.filter((c: Component) => c.category === cat.key && (selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (c.scope_tag || '').includes(t))))}
+        {@const filteredComps = ws.components.filter((c: Component) => c.category === cat.key && matchScopeTags(c.scope_tag))}
         {@const isCollapsed = collapsedCategories[cat.key] === true}
         {@const subGroups = groupComponentsByMount(filteredComps)}
         {@const catIds = filteredComps.map((c: Component) => c.id)}

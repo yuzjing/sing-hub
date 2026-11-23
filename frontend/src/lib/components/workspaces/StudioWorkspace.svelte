@@ -48,6 +48,19 @@
   });
 
   let selectedFilterTags = $state<string[]>([]);
+  let filterMode = $state<'and' | 'or'>('and');
+
+  let filteredProfiles = $derived.by(() => {
+    if (selectedFilterTags.length === 0) return ws.profiles;
+    return ws.profiles.filter((p: Profile) => {
+      const list = p.tags || [];
+      return filterMode === 'and'
+        ? selectedFilterTags.every((t: string) => list.includes(t))
+        : selectedFilterTags.some((t: string) => list.includes(t));
+    });
+  });
+
+  
   let tagCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
     ws.profiles.forEach((p: Profile) => {
@@ -58,11 +71,7 @@
     return counts;
   });
   let availableTags = $derived.by(() => Object.keys(tagCounts));
-  let filteredProfileIds = $derived.by(() => {
-    return ws.profiles
-      .filter((p: Profile) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (p.tags || []).includes(t)))
-      .map((p: Profile) => p.id);
-  });
+  let filteredProfileIds = $derived.by(() => filteredProfiles.map((p: Profile) => p.id));
 
   let allProfilesSelected = $derived.by(() => filteredProfileIds.length > 0 && filteredProfileIds.every((id: string) => selectedProfileIds.includes(id)));
   let someProfilesSelected = $derived.by(() => !allProfilesSelected && filteredProfileIds.some((id: string) => selectedProfileIds.includes(id)));
@@ -247,7 +256,7 @@
     </div>
 
     
-    <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} />
+    <TagFilter {availableTags} {tagCounts} bind:selectedTags={selectedFilterTags} bind:matchMode={filterMode} />
 
     {#if isProfileManageMode}
       <div class="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-amber-50/70 dark:bg-amber-950/20 px-4 py-2 text-xs">
@@ -272,7 +281,7 @@
 
     <div class="flex-1 overflow-y-auto p-3 space-y-2">
       
-      {#each ws.profiles.filter((p: Profile) => selectedFilterTags.length === 0 || selectedFilterTags.some((t: string) => (p.tags || []).includes(t))) as p (p.id)}
+      {#each filteredProfiles as p (p.id)}
         {@const isActive = ws.activeProfileId === p.id}
         <div class="group relative flex flex-col justify-between rounded-xl p-3 text-xs transition border shadow-2xs space-y-2 {isActive && !isProfileManageMode ? 'border-amber-400/80 bg-white text-zinc-900 dark:border-amber-500/70 dark:bg-zinc-900 dark:text-white' : 'border-zinc-200 bg-white/60 text-zinc-600 hover:bg-white dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400 dark:hover:bg-zinc-900'}">
           {#if isActive && !isProfileManageMode}
