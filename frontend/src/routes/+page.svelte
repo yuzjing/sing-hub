@@ -106,7 +106,9 @@
     ws.selectProfile(p.id);
     showProfileModal = false;
     editingProfile = null;
+    isCloning = false;
     ws.showToast('方案保存成功 ✓', 'success');
+    
   }
 
   async function handleSaveComponent(c: Component) {
@@ -302,10 +304,10 @@
           onNewProfile={() => { isCloning = false; editingProfile = null; showProfileModal = true; }}
           onEditProfile={(p: Profile) => { isCloning = false; editingProfile = p; showProfileModal = true; }}
           onCloneProfile={(source: Profile) => {
-            isCloning = false;
+            isCloning = true;
             editingProfile = {
               ...source,
-              id: `${source.id}-copy-${Date.now().toString(36).slice(-4)}`,
+              id: `${source.id}-copy`,
               name: `${source.name} (副本)`,
               token: crypto.randomUUID().replace(/-/g, '').slice(0, 16),
               modules: (source.modules || []).map(m => ({ ...m, id: '', profile_id: '' })),
@@ -390,7 +392,7 @@
 <ModuleMetaModal open={showModuleMetaModal} editModule={editingModule} isClone={isCloning} onClose={() => { showModuleMetaModal = false; editingModule = null; isCloning = false; }} onSave={handleSaveModule} />
 <ModuleParamsModal open={showModuleParamsModal} module={tuningModule} onClose={() => { showModuleParamsModal = false; tuningModule = null; }} onSave={handleSaveModule} />
 <DeviceModal open={showDeviceModal} editDevice={editingDevice} isClone={isCloning} onClose={() => { showDeviceModal = false; editingDevice = null; isCloning = false; }} onSave={handleSaveDevice} />
-<ProfileModal open={showProfileModal} editProfile={editingProfile} onClose={() => (showProfileModal = false)} onSave={handleSaveProfile} />
+<ProfileModal open={showProfileModal} editProfile={editingProfile} isClone={isCloning} onClose={() => { showProfileModal = false; editingProfile = null; isCloning = false; }} onSave={handleSaveProfile} />
 
 <ConfirmModal
   open={confirmState.open}

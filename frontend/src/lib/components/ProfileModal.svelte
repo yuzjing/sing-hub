@@ -7,6 +7,7 @@
   interface Props {
     open?: boolean;
     editProfile?: Profile | null;
+    isClone?: boolean;
     onClose?: () => void;
     onSave?: (data: {
       id: string;
@@ -24,11 +25,13 @@
   let {
     open = false,
     editProfile = null,
+    isClone = false,
     onClose = () => {},
     onSave = () => {}
   }: Props = $props();
 
   let saving = $state(false);
+  let autoDraftId = $state('');
   let id = $state('');
   let name = $state('');
   let token = $state('');
@@ -42,23 +45,24 @@
   $effect(() => {
     if (open) {
       if (editProfile) {
+        autoDraftId = isClone ? ('prof-' + Date.now().toString(36)) : '';
         id = editProfile.id;
         name = editProfile.name;
         token = editProfile.token;
         tagsStr = (editProfile.tags || []).join(', ');
         description = editProfile.description;
-        singBoxVersion = editProfile.sing_box_version || '1.10.0';
+        singBoxVersion = editProfile.sing_box_version || '1.15.0';
         enableSubscribe = editProfile.capabilities?.enable_subscribe ?? true;
         enablePing = editProfile.capabilities?.enable_ping ?? true;
         enablePush = editProfile.capabilities?.enable_push ?? true;
       } else {
-        id = 'prof-' + Date.now().toString(36);
-        // 核心优化：新建时给一个默认名称，防止空值拦截
-        name = '新建方案配方';
+        autoDraftId = 'prof-' + Date.now().toString(36);
+        id = '';
+        name = '';
         token = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
         tagsStr = 'default';
         description = '';
-        singBoxVersion = '1.10.0';
+        singBoxVersion = '1.15.0';
         enableSubscribe = true;
         enablePing = true;
         enablePush = true;
@@ -72,10 +76,20 @@
       ws.showToast('请输入方案名称', 'error');
       return;
     }
+
+    let finalId = id.trim();
+    if (finalId && !/^[a-zA-Z0-9_-]+$/.test(finalId)) {
+      ws.showToast('方案 ID 仅支持英文、数字、下划线与中划线', 'error');
+      return;
+    }
+    if (!finalId) {
+      finalId = autoDraftId || ('prof-' + Date.now().toString(36));
+    }
+
     saving = true;
     try {
       await onSave({
-        id: id || ('prof-' + Date.now().toString(36)),
+        id: finalId,
         name: name.trim(),
         token: token.trim(),
         tags: tagsStr.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
@@ -97,7 +111,7 @@
       <div class="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
         <h3 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
           <Icon name="layers" color="amber" size={17} />
-          <span>{editProfile ? '编辑方案元数据' : '新建方案配方'}</span>
+          <span>{isClone ? '克隆方案配方' : (editProfile ? '编辑方案元数据' : '新建方案配方')}</span>
         </h3>
         <button onclick={onClose} type="button" class="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
           <Icon name="close" size={15} />
@@ -106,6 +120,16 @@
 
       <div class="space-y-3.5 text-xs">
         <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">方案唯一 ID</span>
+            <input
+              bind:value={id}
+              disabled={!!editProfile && !isClone}
+              placeholder="如 client-work，留空自动生成"
+              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+            />
+          </label>
+
           <label class="block">
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
               方案名称 <span class="text-rose-500 font-bold">*</span>
@@ -116,7 +140,9 @@
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
+        </div>
 
+        <div class="grid grid-cols-2 gap-3">
           <label class="block">
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">方案标签 (逗号分隔)</span>
             <input
@@ -125,26 +151,24 @@
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <label class="block">
-            <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">订阅安全 Token</span>
-            <input
-              bind:value={token}
-              class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </label>
 
           <label class="block">
             <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">目标 Sing-box 版本</span>
             <input
               bind:value={singBoxVersion}
-              placeholder="1.10.0"
+              placeholder="1.15.0"
               class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
         </div>
+
+        <label class="block">
+          <span class="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">订阅安全 Token</span>
+          <input
+            bind:value={token}
+            class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </label>
 
         <div class="border-t border-zinc-100 pt-3 dark:border-zinc-800 space-y-2">
           <span class="block font-medium text-zinc-700 dark:text-zinc-300">方案能力开关</span>

@@ -331,8 +331,8 @@
 
           <!-- 第二行：方案短ID + 绿色版本Tag + 标签 + 积木数量 -->
           <div class="flex items-center gap-1.5 flex-wrap pl-1 font-mono text-[10px] w-full">
-            <span class="rounded bg-zinc-100 dark:bg-zinc-800/80 px-1.5 py-0.5 text-zinc-400 dark:text-zinc-500 shrink-0">
-              {p.id.slice(0, 14)}
+            <span title={p.id} class="rounded bg-zinc-100 dark:bg-zinc-800/80 px-1.5 py-0.5 text-zinc-400 dark:text-zinc-500 truncate max-w-32">
+              {p.id}
             </span>
 
             {#if p.sing_box_version && p.sing_box_version !== 'universal'}
