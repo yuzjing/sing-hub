@@ -162,7 +162,6 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /api/system/log-level", s.handleGetLogLevel)
 	s.mux.HandleFunc("POST /api/system/log-level", s.handleSetLogLevel)
-	s.mux.HandleFunc("POST /api/system/git/push", s.handleTestGitPush)
 
 	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	s.mux.HandleFunc("POST /api/settings", s.handleSaveSettings)
