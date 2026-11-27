@@ -2,7 +2,11 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,24 +28,28 @@ import (
 )
 
 type Server struct {
-	store     *store.Store
-	assembler *assembler.Engine
-	gitRepo   *versioning.GitRepo
-	updater   *updater.Updater
-	dbPath    string
-	logLevel  *slog.LevelVar
-	mux       *http.ServeMux
+	store         *store.Store
+	assembler     *assembler.Engine
+	gitRepo       *versioning.GitRepo
+	updater       *updater.Updater
+	dbPath        string
+	logLevel      *slog.LevelVar
+	adminPassword string
+	sessionSecret []byte
+	mux           *http.ServeMux
 }
 
-func New(s *store.Store, a *assembler.Engine, g *versioning.GitRepo, u *updater.Updater, dbPath string, level *slog.LevelVar) *Server {
+func New(s *store.Store, a *assembler.Engine, g *versioning.GitRepo, u *updater.Updater, dbPath string, level *slog.LevelVar, adminPassword string) *Server {
 	srv := &Server{
-		store:     s,
-		assembler: a,
-		gitRepo:   g,
-		updater:   u,
-		dbPath:    dbPath,
-		logLevel:  level,
-		mux:       http.NewServeMux(),
+		store:         s,
+		assembler:     a,
+		gitRepo:       g,
+		updater:       u,
+		dbPath:        dbPath,
+		logLevel:      level,
+		adminPassword: adminPassword,
+		sessionSecret: loadOrCreateSessionSecret(filepath.Dir(dbPath)),
+		mux:           http.NewServeMux(),
 	}
 	srv.routes()
 	return srv
@@ -81,6 +90,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	if s.adminPassword != "" && strings.HasPrefix(r.URL.Path, "/api") && !strings.HasPrefix(r.URL.Path, "/api/auth/") {
+		if !s.isAuthenticated(r) {
+			writeJSON(rw, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+	}
+
 	s.mux.ServeHTTP(rw, r)
 }
 
@@ -95,6 +111,9 @@ func (rw *responseWriterInterceptor) WriteHeader(code int) {
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("GET /sub/{token}", s.handleSubscribe)
 
 	s.mux.HandleFunc("POST /api/components/preview", s.handlePreviewComponent)
@@ -802,4 +821,105 @@ func (s *Server) handleTestGitPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed"})
+}
+
+const sessionCookieName = "singhub_session"
+
+func loadOrCreateSessionSecret(dataDir string) []byte {
+	keyPath := filepath.Join(dataDir, ".session_key")
+	if raw, err := os.ReadFile(keyPath); err == nil {
+		if decoded, decErr := hex.DecodeString(strings.TrimSpace(string(raw))); decErr == nil && len(decoded) == 32 {
+			return decoded
+		}
+	}
+	buf := make([]byte, 32)
+	_, _ = rand.Read(buf)
+	_ = os.WriteFile(keyPath, []byte(hex.EncodeToString(buf)), 0600)
+	return buf
+}
+
+func (s *Server) signSession(exp int64) string {
+	expStr := strconv.FormatInt(exp, 10)
+	mac := hmac.New(sha256.New, s.sessionSecret)
+	mac.Write([]byte(expStr))
+	return expStr + "." + hex.EncodeToString(mac.Sum(nil))
+}
+
+func (s *Server) isAuthenticated(r *http.Request) bool {
+	if s.adminPassword == "" {
+		return true
+	}
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return false
+	}
+	parts := strings.SplitN(cookie.Value, ".", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	exp, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	gotSig, err := hex.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, s.sessionSecret)
+	mac.Write([]byte(parts[0]))
+	return hmac.Equal(gotSig, mac.Sum(nil))
+}
+
+func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"enabled":       s.adminPassword != "",
+		"authenticated": s.isAuthenticated(r),
+	})
+}
+
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if s.adminPassword == "" {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	inHash := sha256.Sum256([]byte(req.Password))
+	wantHash := sha256.Sum256([]byte(s.adminPassword))
+	if subtle.ConstantTimeCompare(inHash[:], wantHash[:]) != 1 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "密码错误"})
+		return
+	}
+
+	exp := time.Now().Add(7 * 24 * time.Hour).Unix()
+	isHTTPS := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    s.signSession(exp),
+		Path:     "/",
+		MaxAge:   7 * 86400,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isHTTPS,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	isHTTPS := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isHTTPS,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }

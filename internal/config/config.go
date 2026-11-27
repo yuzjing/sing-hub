@@ -6,9 +6,10 @@ import (
 )
 
 type Config struct {
-	Listen   string
-	DataDir  string
-	LogLevel string
+	Listen        string
+	DataDir       string
+	LogLevel      string
+	AdminPassword string
 }
 
 // Load 纯标准库实现：命令行 Flag > 环境变量 > 默认值
@@ -17,17 +18,20 @@ func Load() Config {
 	defaultListen := getEnv("LISTEN", ":8080")
 	defaultDataDir := getEnv("DATA_DIR", "./data")
 	defaultLogLevel := getEnv("LOG_LEVEL", "info")
+	defaultAdminPass := getEnv("ADMIN_PASSWORD", "")
 
 	// 2. 允许命令行参数临时覆盖（适合临时排错与调试）
 	listen := flag.String("listen", defaultListen, "Server listen address")
 	dataDir := flag.String("data-dir", defaultDataDir, "Directory for database, git repo, and binaries")
 	logLevel := flag.String("log-level", defaultLogLevel, "Log level (debug, info, warn, error)")
+	adminPass := flag.String("admin-password", defaultAdminPass, "Admin login password (empty disables auth)")
 	flag.Parse()
 
 	return Config{
-		Listen:   *listen,
-		DataDir:  *dataDir,
-		LogLevel: *logLevel,
+		Listen:        *listen,
+		DataDir:       *dataDir,
+		LogLevel:      *logLevel,
+		AdminPassword: *adminPass,
 	}
 }
 

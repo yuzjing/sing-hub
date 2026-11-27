@@ -299,6 +299,22 @@ class ApiClient {
   async testGitPush(): Promise<{ status: string }> {
     return this.request<{ status: string }>('/api/system/git/push', { method: 'POST' });
   }
+
+  async getAuthStatus(): Promise<{ enabled: boolean; authenticated: boolean }> {
+    return this.request<{ enabled: boolean; authenticated: boolean }>('/api/auth/status');
+  }
+
+  async login(password: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+  }
+
+  async logout(): Promise<{ status: string }> {
+    return this.request<{ status: string }>('/api/auth/logout', { method: 'POST' });
+  }
 }
 
 

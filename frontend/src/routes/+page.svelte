@@ -75,9 +75,55 @@
     };
   }
 
-  onMount(() => {
-    ws.init();
+  let authChecked = $state(false);
+  let authRequired = $state(false);
+  let isAuthenticated = $state(true);
+  let loginPassword = $state('');
+  let isLoggingIn = $state(false);
+  let loginError = $state('');
+
+  onMount(async () => {
+    ws.initTheme();
+    try {
+      const status = await api.getAuthStatus();
+      authRequired = status.enabled;
+      isAuthenticated = !status.enabled || status.authenticated;
+    } catch {
+      isAuthenticated = true;
+    } finally {
+      authChecked = true;
+    }
+    if (isAuthenticated) {
+      await ws.init();
+    }
   });
+
+  async function handleLogin(e: SubmitEvent) {
+    e.preventDefault();
+    if (isLoggingIn || !loginPassword) return;
+    isLoggingIn = true;
+    loginError = '';
+    try {
+      await api.login(loginPassword);
+      isAuthenticated = true;
+      loginPassword = '';
+      await ws.init();
+    } catch (err: unknown) {
+      loginError = err instanceof Error ? err.message : '登录失败，请检查密码';
+    } finally {
+      isLoggingIn = false;
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await api.logout();
+    } finally {
+      isAuthenticated = false;
+      loginPassword = '';
+      loginError = '';
+    }
+  }
 
   // 关键修复：加入 tags: string[]，确保方案标签完整持久化保存
   async function handleSaveProfile(data: {
@@ -145,222 +191,294 @@
   }
 </script>
 
-<div class="flex h-screen w-screen overflow-hidden bg-zinc-100 text-zinc-900 transition-colors duration-200 dark:bg-zinc-950 dark:text-zinc-100 font-sans">
-  {#if ws.toastMessage}
-    {@const isErr = ws.toastMessage.type === 'error'}
-    <div class="fixed top-5 left-1/2 -translate-x-1/2 z-60 flex items-center gap-2 rounded-full border {isErr ? 'border-rose-500/50 bg-rose-950/90 text-rose-200' : 'border-emerald-500/30 bg-zinc-900/90 text-white'} px-4 py-2 shadow-2xl backdrop-blur-md text-xs font-medium animate-in fade-in slide-in-from-top-2 duration-150">
-      <span class="h-2 w-2 rounded-full {isErr ? 'bg-rose-500 shadow-[0_0_8px_#f43f5e]' : 'bg-emerald-400 shadow-[0_0_6px_#34d399]'}"></span>
-      <span>{ws.toastMessage.text}</span>
-    </div>
-  {/if}
+{#if !authChecked}
+  <div class="flex h-screen w-screen items-center justify-center bg-zinc-100 text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400 text-xs font-mono">
+    正在核验控制面状态...
+  </div>
+{:else if authRequired && !isAuthenticated}
+  <div class="flex h-screen w-screen items-center justify-center bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 p-4 font-sans transition-colors duration-200">
+    <form
+      onsubmit={handleLogin}
+      class="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-7 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 space-y-6"
+    >
+      <div class="flex flex-col items-center text-center space-y-2.5">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 p-2.5 shadow-md ring-1 ring-zinc-800 dark:ring-zinc-700">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <defs>
+              <linearGradient id="loginLogoGrad" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#38bdf8"/>
+                <stop offset="0.5" stop-color="#818cf8"/>
+                <stop offset="1" stop-color="#c084fc"/>
+              </linearGradient>
+            </defs>
+            <path d="M16 4L27 10V22L16 28L5 22V10L16 4Z" stroke="url(#loginLogoGrad)" stroke-width="2.5" stroke-linejoin="round"/>
+            <circle cx="16" cy="16" r="3.5" fill="url(#loginLogoGrad)"/>
+            <path d="M16 4V12.5M27 22L19 17.5M5 22L13 17.5" stroke="url(#loginLogoGrad)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="font-mono text-base font-bold tracking-wider text-zinc-900 dark:text-zinc-100">SING-HUB</h1>
+          <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Sing-box 基础设施控制面</p>
+        </div>
+      </div>
 
-  <!-- 左侧全局主侧边栏 -->
-  <aside class="flex shrink-0 flex-col justify-between border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/80 z-20 transition-all duration-200 {ws.isSidebarExpanded ? 'w-48 px-3.5 py-3.5' : 'w-14 items-center py-3.5'}">
-    <div class="flex flex-col gap-5 {ws.isSidebarExpanded ? 'items-start w-full' : 'items-center'}">
-      <div class="flex items-center justify-between w-full">
-        <div class="flex items-center gap-2.5">
-          <div title="Sing-Hub Core" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-900 p-1.5 shadow-sm ring-1 ring-zinc-800 dark:bg-zinc-900 dark:ring-zinc-700">
-            <svg width="20" height="20" viewBox="0 0 32 32" fill="none" class="shrink-0">
-              <defs>
-                <linearGradient id="sideLogoGrad" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
-                  <stop stop-color="#38bdf8"/>
-                  <stop offset="0.5" stop-color="#818cf8"/>
-                  <stop offset="1" stop-color="#c084fc"/>
-                </linearGradient>
-              </defs>
-              <path d="M16 4L27 10V22L16 28L5 22V10L16 4Z" stroke="url(#sideLogoGrad)" stroke-width="2.5" stroke-linejoin="round"/>
-              <circle cx="16" cy="16" r="3.5" fill="url(#sideLogoGrad)"/>
-              <path d="M16 4V12.5M27 22L19 17.5M5 22L13 17.5" stroke="url(#sideLogoGrad)" stroke-width="2" stroke-linecap="round"/>
-            </svg>
+      <div class="space-y-3">
+        <label class="block">
+          <span class="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1.5">管理密码</span>
+          <input
+            type="password"
+            bind:value={loginPassword}
+            placeholder="请输入 ADMIN_PASSWORD"
+            autocomplete="current-password"
+            class="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-sm font-mono dark:border-zinc-700 dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition"
+          />
+        </label>
+
+        {#if loginError}
+          <div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-400">
+            {loginError}
           </div>
-          {#if ws.isSidebarExpanded}
-            <span class="font-mono text-xs font-bold tracking-wider text-zinc-900 dark:text-zinc-100">SING-HUB</span>
+        {/if}
+
+        <button
+          type="submit"
+          disabled={isLoggingIn || !loginPassword}
+          class="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isLoggingIn ? '验证中...' : '解锁进入控制台'}
+        </button>
+      </div>
+    </form>
+  </div>
+{:else}
+  <div class="flex h-screen w-screen overflow-hidden bg-zinc-100 text-zinc-900 transition-colors duration-200 dark:bg-zinc-950 dark:text-zinc-100 font-sans">
+    {#if ws.toastMessage}
+      {@const isErr = ws.toastMessage.type === 'error'}
+      <div class="fixed top-5 left-1/2 -translate-x-1/2 z-60 flex items-center gap-2 rounded-full border {isErr ? 'border-rose-500/50 bg-rose-950/90 text-rose-200' : 'border-emerald-500/30 bg-zinc-900/90 text-white'} px-4 py-2 shadow-2xl backdrop-blur-md text-xs font-medium animate-in fade-in slide-in-from-top-2 duration-150">
+        <span class="h-2 w-2 rounded-full {isErr ? 'bg-rose-500 shadow-[0_0_8px_#f43f5e]' : 'bg-emerald-400 shadow-[0_0_6px_#34d399]'}"></span>
+        <span>{ws.toastMessage.text}</span>
+      </div>
+    {/if}
+
+    <!-- 左侧全局主侧边栏 -->
+    <aside class="flex shrink-0 flex-col justify-between border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/80 z-20 transition-all duration-200 {ws.isSidebarExpanded ? 'w-48 px-3.5 py-3.5' : 'w-14 items-center py-3.5'}">
+      <div class="flex flex-col gap-5 {ws.isSidebarExpanded ? 'items-start w-full' : 'items-center'}">
+        <div class="flex items-center justify-between w-full">
+          <div class="flex items-center gap-2.5">
+            <div title="Sing-Hub Core" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-900 p-1.5 shadow-sm ring-1 ring-zinc-800 dark:bg-zinc-900 dark:ring-zinc-700">
+              <svg width="20" height="20" viewBox="0 0 32 32" fill="none" class="shrink-0">
+                <defs>
+                  <linearGradient id="sideLogoGrad" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#38bdf8"/>
+                    <stop offset="0.5" stop-color="#818cf8"/>
+                    <stop offset="1" stop-color="#c084fc"/>
+                  </linearGradient>
+                </defs>
+                <path d="M16 4L27 10V22L16 28L5 22V10L16 4Z" stroke="url(#sideLogoGrad)" stroke-width="2.5" stroke-linejoin="round"/>
+                <circle cx="16" cy="16" r="3.5" fill="url(#sideLogoGrad)"/>
+                <path d="M16 4V12.5M27 22L19 17.5M5 22L13 17.5" stroke="url(#sideLogoGrad)" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            {#if ws.isSidebarExpanded}
+              <span class="font-mono text-xs font-bold tracking-wider text-zinc-900 dark:text-zinc-100">SING-HUB</span>
+            {/if}
+          </div>
+          <button
+            onclick={() => ws.toggleSidebar()}
+            type="button"
+            class="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 transition cursor-pointer"
+          >
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              {#if ws.isSidebarExpanded}
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+              {:else}
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+              {/if}
+            </svg>
+          </button>
+        </div>
+
+        <nav class="flex flex-col gap-1.5 w-full">
+          <button
+            onclick={() => ws.switchWorkspace('studio')}
+            type="button"
+            class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'studio' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
+          >
+            <Icon name="layers" color={ws.currentWorkspace === 'studio' ? 'amber' : 'default'} size={17} />
+            {#if ws.isSidebarExpanded}<span>装配大盘</span>{/if}
+          </button>
+
+          <button
+            onclick={() => ws.switchWorkspace('modules')}
+            type="button"
+            class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'modules' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
+          >
+            <Icon name="boxes" color={ws.currentWorkspace === 'modules' ? 'blue' : 'default'} size={17} />
+            {#if ws.isSidebarExpanded}<span>成品积木库</span>{/if}
+          </button>
+
+          <button
+            onclick={() => {
+              ws.switchWorkspace('foundry');
+              if (ws.components.length > 0 && !studioActiveCompId) studioActiveCompId = ws.components[0].id;
+            }}
+            type="button"
+            class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'foundry' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
+          >
+            <Icon name="sliders" color={ws.currentWorkspace === 'foundry' ? 'emerald' : 'default'} size={17} />
+            {#if ws.isSidebarExpanded}<span>语法母版工坊</span>{/if}
+          </button>
+
+          <button
+            onclick={() => ws.switchWorkspace('fleet')}
+            type="button"
+            class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'fleet' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
+          >
+            <Icon name="server" color={ws.currentWorkspace === 'fleet' ? 'blue' : 'default'} size={17} />
+            {#if ws.isSidebarExpanded}<span>节点管理</span>{/if}
+          </button>
+        </nav>
+      </div>
+
+      <div class="flex flex-col gap-2 w-full {ws.isSidebarExpanded ? 'items-start' : 'items-center'}">
+        <button
+          onclick={() => (ws.showSettingsDrawer = true)}
+          type="button"
+          class="flex items-center gap-3 rounded-lg text-xs text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 cursor-pointer transition {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-8 w-8 justify-center'}"
+        >
+          <Icon name="settings" size={17} />
+          {#if ws.isSidebarExpanded}<span>系统设置</span>{/if}
+        </button>
+        {#if authRequired}
+          <button
+            onclick={handleLogout}
+            type="button"
+            title="锁定并退出登录"
+            class="flex items-center gap-3 rounded-lg text-xs text-zinc-500 hover:bg-rose-50 hover:text-rose-600 dark:text-zinc-400 dark:hover:bg-rose-950/30 dark:hover:text-rose-400 cursor-pointer transition {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-8 w-8 justify-center'}"
+          >
+            <Icon name="close" size={16} />
+            {#if ws.isSidebarExpanded}<span>退出登录</span>{/if}
+          </button>
+        {/if}
+      </div>
+    </aside>
+
+    <!-- 右侧主区域 -->
+    <div class="flex flex-1 min-w-0 flex-col overflow-hidden">
+      <header class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white/90 px-6 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/90 z-10">
+        <div class="flex items-center gap-3">
+          {#if ws.currentWorkspace === 'studio'}
+            <Icon name="layers" color="amber" size={20} />
+            <div>
+              <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">方案装配大盘 (Studio)</h1>
+              <span class="text-[10px] text-zinc-400">编排成品积木流水线，输出最终合规全局配置</span>
+            </div>
+          {:else if ws.currentWorkspace === 'modules'}
+            <Icon name="boxes" color="blue" size={20} />
+            <div>
+              <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">成品积木库 (Modules Inventory)</h1>
+              <span class="text-[10px] text-zinc-400">母版派生的独立实参实体，支持同协议多实例与跨方案复用</span>
+            </div>
+          {:else if ws.currentWorkspace === 'foundry'}
+            <Icon name="sliders" color="emerald" size={20} />
+            <div>
+              <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">原子语法母版工坊 (Foundry)</h1>
+              <span class="text-[10px] text-zinc-400">1:1 对标 Sing-box 官方字段与插孔定义，提供软链接指针</span>
+            </div>
+          {:else}
+            <Icon name="server" color="blue" size={20} />
+            <div>
+              <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">网络节点与实例 (Nodes & Instances)</h1>
+              <span class="text-[10px] text-zinc-400">管理基础设施节点，原生支持 IPv6/双栈多端点与四步安全推送</span>
+            </div>
           {/if}
         </div>
-        <button
-          onclick={() => ws.toggleSidebar()}
-          type="button"
-          class="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 transition cursor-pointer"
-        >
-          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            {#if ws.isSidebarExpanded}
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-            {:else}
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-            {/if}
-          </svg>
-        </button>
-      </div>
 
-      <nav class="flex flex-col gap-1.5 w-full">
-        <button
-          onclick={() => ws.switchWorkspace('studio')}
-          type="button"
-          class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'studio' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
-        >
-          <Icon name="layers" color={ws.currentWorkspace === 'studio' ? 'amber' : 'default'} size={17} />
-          {#if ws.isSidebarExpanded}<span>装配大盘</span>{/if}
-        </button>
+        <div class="flex items-center gap-2">
+          {#if ws.currentWorkspace === 'fleet'}
+            <button onclick={() => { isDeviceManageMode = !isDeviceManageMode; selectedDeviceIds = []; }} type="button" class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 cursor-pointer flex items-center gap-1.5">
+              <Icon name="sliders" size={13} />
+              <span>{isDeviceManageMode ? '退出管理' : '批量整理'}</span>
+            </button>
+            <button disabled={ws.isPingAllLoading} onclick={() => ws.pingAllNodes()} type="button" class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
+              <Icon name="refresh" size={13} class={ws.isPingAllLoading ? 'animate-spin' : ''} />
+              <span>{ws.isPingAllLoading ? '探测中...' : '一键全网探活'}</span>
+            </button>
+            <button onclick={() => { isCloning = false; editingDevice = null; showDeviceModal = true; }} type="button" class="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 shadow-xs transition cursor-pointer flex items-center gap-1.5">
+              <Icon name="plus" size={14} />
+              <span>接入新节点</span>
+            </button>
+          {/if}
+        </div>
+      </header>
 
-        <button
-          onclick={() => ws.switchWorkspace('modules')}
-          type="button"
-          class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'modules' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
-        >
-          <Icon name="boxes" color={ws.currentWorkspace === 'modules' ? 'blue' : 'default'} size={17} />
-          {#if ws.isSidebarExpanded}<span>成品积木库</span>{/if}
-        </button>
-
-        <button
-          onclick={() => {
-            ws.switchWorkspace('foundry');
-            if (ws.components.length > 0 && !studioActiveCompId) studioActiveCompId = ws.components[0].id;
-          }}
-          type="button"
-          class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'foundry' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
-        >
-          <Icon name="sliders" color={ws.currentWorkspace === 'foundry' ? 'emerald' : 'default'} size={17} />
-          {#if ws.isSidebarExpanded}<span>语法母版工坊</span>{/if}
-        </button>
-
-        <button
-          onclick={() => ws.switchWorkspace('fleet')}
-          type="button"
-          class="flex items-center gap-3 rounded-lg text-xs font-medium transition cursor-pointer {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-9 w-9 justify-center'} {ws.currentWorkspace === 'fleet' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 font-semibold' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}"
-        >
-          <Icon name="server" color={ws.currentWorkspace === 'fleet' ? 'blue' : 'default'} size={17} />
-          {#if ws.isSidebarExpanded}<span>节点管理</span>{/if}
-        </button>
-      </nav>
-    </div>
-
-    <div class="flex flex-col gap-2 w-full {ws.isSidebarExpanded ? 'items-start' : 'items-center'}">
-      <button
-        onclick={() => (ws.showSettingsDrawer = true)}
-        type="button"
-        class="flex items-center gap-3 rounded-lg text-xs text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 cursor-pointer transition {ws.isSidebarExpanded ? 'w-full px-3 py-2' : 'h-8 w-8 justify-center'}"
-      >
-        <Icon name="settings" size={17} />
-        {#if ws.isSidebarExpanded}<span>系统设置</span>{/if}
-      </button>
-    </div>
-  </aside>
-
-  <!-- 右侧主区域 -->
-  <div class="flex flex-1 min-w-0 flex-col overflow-hidden">
-    <header class="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white/90 px-6 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/90 z-10">
-      <div class="flex items-center gap-3">
+      <!-- 工作区主体 -->
+      {#key ws.currentWorkspace}
         {#if ws.currentWorkspace === 'studio'}
-          <Icon name="layers" color="amber" size={20} />
-          <div>
-            <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">方案装配大盘 (Studio)</h1>
-            <span class="text-[10px] text-zinc-400">编排成品积木流水线，输出最终合规全局配置</span>
-          </div>
+          <StudioWorkspace
+            bind:isProfileManageMode
+            bind:selectedProfileIds
+            onNewProfile={() => { isCloning = false; editingProfile = null; showProfileModal = true; }}
+            onEditProfile={(p: Profile) => { isCloning = false; editingProfile = p; showProfileModal = true; }}
+            onCloneProfile={(source: Profile) => {
+              isCloning = true;
+              editingProfile = {
+                ...source,
+                id: `${source.id}-copy`,
+                name: `${source.name} (副本)`,
+                token: crypto.randomUUID().replace(/-/g, '').slice(0, 16),
+                modules: (source.modules || []).map(m => ({ ...m, id: '', profile_id: '' })),
+              };
+              showProfileModal = true;
+            }}
+            onOpenMount={() => (showMountDrawer = true)}
+            {triggerConfirm}
+          />
         {:else if ws.currentWorkspace === 'modules'}
-          <Icon name="boxes" color="blue" size={20} />
-          <div>
-            <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">成品积木库 (Modules Inventory)</h1>
-            <span class="text-[10px] text-zinc-400">母版派生的独立实参实体，支持同协议多实例与跨方案复用</span>
-          </div>
+          <ModulesWorkspace
+            bind:activeModuleId
+            bind:isModuleManageMode
+            bind:selectedModuleIds
+            onNewModule={() => { isCloning = false; editingModule = null; showModuleMetaModal = true; }}
+            onEditModuleMeta={(mod: Module) => { isCloning = false; editingModule = mod; showModuleMetaModal = true; }}
+            onCloneModule={(source: Module) => {
+              isCloning = true;
+              editingModule = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
+              showModuleMetaModal = true;
+            }}
+            {triggerConfirm}
+          />
         {:else if ws.currentWorkspace === 'foundry'}
-          <Icon name="sliders" color="emerald" size={20} />
-          <div>
-            <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">原子语法母版工坊 (Foundry)</h1>
-            <span class="text-[10px] text-zinc-400">1:1 对标 Sing-box 官方字段与插孔定义，提供软链接指针</span>
-          </div>
-        {:else}
-          <Icon name="server" color="blue" size={20} />
-          <div>
-            <h1 class="text-sm font-bold text-zinc-900 dark:text-zinc-100 leading-tight">网络节点与实例 (Nodes & Instances)</h1>
-            <span class="text-[10px] text-zinc-400">管理基础设施节点，原生支持 IPv6/双栈多端点与四步安全推送</span>
-          </div>
+          <FoundryWorkspace
+            bind:studioActiveCompId
+            bind:isCompManageMode
+            bind:selectedCompIds
+            onNewComponent={() => { isCloning = false; editingComponent = null; showNewCompModal = true; }}
+            onEditComponent={(comp: Component) => { isCloning = false; editingComponent = comp; showNewCompModal = true; }}
+            onCloneComponent={(source: Component) => {
+              isCloning = true;
+              editingComponent = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
+              showNewCompModal = true;
+            }}
+            {triggerConfirm}
+          />
+        {:else if ws.currentWorkspace === 'fleet'}
+          <FleetWorkspace
+            bind:isDeviceManageMode
+            bind:selectedDeviceIds
+            onEditDevice={(dev: Device) => { isCloning = false; editingDevice = dev; showDeviceModal = true; }}
+            onCloneDevice={(source: Device) => {
+              isCloning = true;
+              editingDevice = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
+              showDeviceModal = true;
+            }}
+            {triggerConfirm}
+          />
         {/if}
-      </div>
-
-      <div class="flex items-center gap-2">
-        {#if ws.currentWorkspace === 'fleet'}
-          <button onclick={() => { isDeviceManageMode = !isDeviceManageMode; selectedDeviceIds = []; }} type="button" class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 cursor-pointer flex items-center gap-1.5">
-            <Icon name="sliders" size={13} />
-            <span>{isDeviceManageMode ? '退出管理' : '批量整理'}</span>
-          </button>
-          <button disabled={ws.isPingAllLoading} onclick={() => ws.pingAllNodes()} type="button" class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
-            <Icon name="refresh" size={13} class={ws.isPingAllLoading ? 'animate-spin' : ''} />
-            <span>{ws.isPingAllLoading ? '探测中...' : '一键全网探活'}</span>
-          </button>
-          <button onclick={() => { isCloning = false; editingDevice = null; showDeviceModal = true; }} type="button" class="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 shadow-xs transition cursor-pointer flex items-center gap-1.5">
-            <Icon name="plus" size={14} />
-            <span>接入新节点</span>
-          </button>
-        {/if}
-      </div>
-    </header>
-
-    <!-- 工作区主体 -->
-    {#key ws.currentWorkspace}
-      {#if ws.currentWorkspace === 'studio'}
-        <StudioWorkspace
-          bind:isProfileManageMode
-          bind:selectedProfileIds
-          onNewProfile={() => { isCloning = false; editingProfile = null; showProfileModal = true; }}
-          onEditProfile={(p: Profile) => { isCloning = false; editingProfile = p; showProfileModal = true; }}
-          onCloneProfile={(source: Profile) => {
-            isCloning = true;
-            editingProfile = {
-              ...source,
-              id: `${source.id}-copy`,
-              name: `${source.name} (副本)`,
-              token: crypto.randomUUID().replace(/-/g, '').slice(0, 16),
-              modules: (source.modules || []).map(m => ({ ...m, id: '', profile_id: '' })),
-            };
-            showProfileModal = true;
-          }}
-          onOpenMount={() => (showMountDrawer = true)}
-          {triggerConfirm}
-        />
-      {:else if ws.currentWorkspace === 'modules'}
-        <ModulesWorkspace
-          bind:activeModuleId
-          bind:isModuleManageMode
-          bind:selectedModuleIds
-          onNewModule={() => { isCloning = false; editingModule = null; showModuleMetaModal = true; }}
-          onEditModuleMeta={(mod: Module) => { isCloning = false; editingModule = mod; showModuleMetaModal = true; }}
-          onCloneModule={(source: Module) => {
-            isCloning = true;
-            editingModule = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
-            showModuleMetaModal = true;
-          }}
-          {triggerConfirm}
-        />
-      {:else if ws.currentWorkspace === 'foundry'}
-        <FoundryWorkspace
-          bind:studioActiveCompId
-          bind:isCompManageMode
-          bind:selectedCompIds
-          onNewComponent={() => { isCloning = false; editingComponent = null; showNewCompModal = true; }}
-          onEditComponent={(comp: Component) => { isCloning = false; editingComponent = comp; showNewCompModal = true; }}
-          onCloneComponent={(source: Component) => {
-            isCloning = true;
-            editingComponent = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
-            showNewCompModal = true;
-          }}
-          {triggerConfirm}
-        />
-      {:else if ws.currentWorkspace === 'fleet'}
-        <FleetWorkspace
-          bind:isDeviceManageMode
-          bind:selectedDeviceIds
-          onEditDevice={(dev: Device) => { isCloning = false; editingDevice = dev; showDeviceModal = true; }}
-          onCloneDevice={(source: Device) => {
-            isCloning = true;
-            editingDevice = { ...source, id: `${source.id}-copy`, name: `${source.name} (副本)` };
-            showDeviceModal = true;
-          }}
-          {triggerConfirm}
-        />
-      {/if}
-    {/key}
+      {/key}
+    </div>
   </div>
-</div>
+{/if}
 
 <!-- 批量操作浮岛 -->
 {#if selectedCompIds.length > 0 || selectedModuleIds.length > 0 || selectedDeviceIds.length > 0 || selectedProfileIds.length > 0}

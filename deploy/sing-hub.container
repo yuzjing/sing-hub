@@ -20,6 +20,7 @@ Environment=DATA_DIR=/data
 Environment=LISTEN=:8080
 # 追求节能安静可用WARN
 Environment=LOG_LEVEL=info
+Environment=ADMIN_PASSWORD=你的高强度控制台密码
 
 [Service]
 MemoryMax=256M

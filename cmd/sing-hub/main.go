@@ -63,7 +63,7 @@ func main() {
 	eng := assembler.New(s, gitRepo, binDir)
 	upd := updater.New(s, binDir)
 
-	srv := server.New(s, eng, gitRepo, upd, dbPath, logLevel)
+	srv := server.New(s, eng, gitRepo, upd, dbPath, logLevel, cfg.AdminPassword)
 
 	httpServer := &http.Server{
 		Addr:    cfg.Listen,
