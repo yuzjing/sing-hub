@@ -1,8 +1,9 @@
 <!-- frontend/src/lib/components/SettingsDrawer.svelte -->
 <script lang="ts">
   import { ws } from '$lib/workspace.svelte';
-  import { api } from '$lib/api';
+  import { api, type GitStatus } from '$lib/api';
   import Icon from '$lib/components/Icon.svelte';
+  
 
   interface Props {
     open?: boolean;
@@ -15,6 +16,37 @@
   let isPushingGit = $state(false);
   let linterEnabled = $state(true);
   let gitUseProxy = $state(false);
+
+  let deletingBackup = $state('');
+  let isCheckingRemote = $state(false);
+  let gitStatus = $state<GitStatus | null>(null);
+
+  async function fetchGitStatus(checkRemote = false) {
+    if (checkRemote) isCheckingRemote = true;
+    try {
+      gitStatus = await api.getGitStatus(checkRemote);
+    } catch {
+      // ignore
+    } finally {
+      if (checkRemote) isCheckingRemote = false;
+    }
+  }
+
+  async function handleDeleteBackup(fileName: string) {
+    if (deletingBackup || ws.isBackupWorking) return;
+    deletingBackup = fileName;
+    try {
+      await api.deleteServerBackup(fileName);
+      await ws.loadServerBackups();
+      await fetchGitStatus(false);
+      ws.showToast('已删除快照 [' + fileName + ']', 'info');
+    } catch (e: unknown) {
+      ws.showToast(e instanceof Error ? e.message : '删除失败', 'error');
+    } finally {
+      deletingBackup = '';
+    }
+  }
+
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
   function stopPolling() {
@@ -30,6 +62,7 @@
       gitUseProxy = ws.systemSettings.git_use_proxy === 'true';
       if (!ws.systemSettings.singbox_update_channel) ws.systemSettings.singbox_update_channel = 'all';
       ws.fetchUpdaterStatus();
+      fetchGitStatus(false);
     } else {
       stopPolling();
     }
@@ -87,11 +120,13 @@
       ws.systemSettings.singbox_linter_enabled = String(linterEnabled);
       ws.systemSettings.git_use_proxy = String(gitUseProxy);
       await ws.saveSettings(ws.systemSettings);
-      await api.testGitPush();
-      ws.showToast('Git 远端推送测试成功 ✓', 'success');
+      gitStatus = await api.testGitPush();
+      await ws.loadServerBackups();
+      ws.showToast('Git 远端同步推送成功 ✓', 'success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '推送失败';
       ws.showToast(msg, 'error');
+      await fetchGitStatus(false);
     } finally {
       isPushingGit = false;
     }
@@ -108,6 +143,9 @@
 
   let stableInfo = $derived.by(() => getVerStatus(ws.updaterStatus?.local_stable_version, ws.updaterStatus?.remote_stable_version));
   let alphaInfo = $derived.by(() => getVerStatus(ws.updaterStatus?.local_alpha_version, ws.updaterStatus?.remote_alpha_version));
+
+  
+  
 </script>
 
 {#if open}
@@ -372,19 +410,35 @@
 
           <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
             {#each ws.serverBackups as b (b.file_name)}
-              <div class="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 text-[11px] font-mono">
-                <div class="truncate mr-2">
-                  <span class="text-zinc-700 dark:text-zinc-300 block truncate">{b.file_name}</span>
-                  <span class="text-[10px] text-zinc-400">{(b.size_bytes / 1024).toFixed(1)} KB</span>
+              {@const isAuto = b.file_name.startsWith('auto_')}
+              <div class="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 text-xs font-mono gap-2">
+                <div class="truncate min-w-0 flex-1">
+                  <div class="flex items-center gap-1.5">
+                    <span class="px-1.5 py-0.5 rounded text-xs font-sans font-semibold shrink-0 {isAuto ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400' : 'bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400'}">
+                      {isAuto ? '自动' : '手动'}
+                    </span>
+                    <span class="text-zinc-700 dark:text-zinc-300 truncate">{b.file_name}</span>
+                  </div>
+                  <span class="text-xs text-zinc-400">{(b.size_bytes / 1024).toFixed(1)} KB</span>
                 </div>
-                <button
-                  disabled={ws.isBackupWorking}
-                  onclick={() => ws.restoreFromPath(b.path)}
-                  type="button"
-                  class="rounded bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 px-2 py-0.5 text-xs font-medium hover:bg-rose-100 cursor-pointer shrink-0"
-                >
-                  恢复
-                </button>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <button
+                    disabled={ws.isBackupWorking || deletingBackup === b.file_name}
+                    onclick={() => ws.restoreFromPath(b.path)}
+                    type="button"
+                    class="rounded bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 px-2 py-0.5 text-xs font-medium hover:bg-blue-100 cursor-pointer"
+                  >
+                    恢复
+                  </button>
+                  <button
+                    disabled={ws.isBackupWorking || deletingBackup === b.file_name}
+                    onclick={() => handleDeleteBackup(b.file_name)}
+                    type="button"
+                    class="rounded bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 px-2 py-0.5 text-xs font-medium hover:bg-rose-100 cursor-pointer disabled:opacity-50"
+                  >
+                    {deletingBackup === b.file_name ? '...' : '删除'}
+                  </button>
+                </div>
               </div>
             {:else}
               <span class="text-xs text-zinc-400 italic block py-2 text-center">暂无本地快照</span>
@@ -395,6 +449,45 @@
         <!-- GitOps 仓库同步备份 -->
         <div class="space-y-3 border-t border-zinc-100 pt-5 dark:border-zinc-800">
           <span class="font-bold text-zinc-800 dark:text-zinc-100 block text-sm">GitOps 仓库同步备份 (请使用 Private 私有库)</span>
+
+          {#if gitStatus?.initialized}
+            <div class="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 p-3 text-xs space-y-2">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full {gitStatus.synced ? 'bg-emerald-500' : 'bg-amber-500'}"></span>
+                  <span class="font-bold {gitStatus.synced ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}">
+                    {gitStatus.synced ? '已与远端同步' : (gitStatus.ahead_count > 0 ? `领先远端 ${gitStatus.ahead_count} 次提交` : '待检查或未推送')}
+                  </span>
+                </div>
+                <button
+                  disabled={isCheckingRemote || !ws.systemSettings.git_remote_url}
+                  onclick={() => fetchGitStatus(true)}
+                  type="button"
+                  class="text-xs font-mono text-blue-600 dark:text-blue-400 hover:underline cursor-pointer disabled:opacity-40"
+                >
+                  {isCheckingRemote ? '检查中...' : '检查远端 ↻'}
+                </button>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 font-mono text-xs">
+                <div class="rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 px-2.5 py-1.5">
+                  <span class="text-zinc-400 block">本地 HEAD</span>
+                  <strong class="text-zinc-800 dark:text-zinc-200">{gitStatus.local_head || '-'}</strong>
+                </div>
+                <div class="rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 px-2.5 py-1.5">
+                  <span class="text-zinc-400 block">远端 / 上次推送</span>
+                  <strong class="text-zinc-800 dark:text-zinc-200">{gitStatus.remote_head || gitStatus.last_pushed_head || '-'}</strong>
+                </div>
+              </div>
+
+              {#if gitStatus.last_push_error}
+                <div class="text-xs font-mono text-rose-600 dark:text-rose-400 truncate" title={gitStatus.last_push_error}>
+                  ⚠️ {gitStatus.last_push_error}
+                </div>
+              {/if}
+            </div>
+          {/if}
+
           <div class="space-y-2">
             <div class="grid grid-cols-3 gap-2">
               <label class="block col-span-2">
@@ -447,7 +540,7 @@
               type="button"
               class="rounded-lg border border-blue-600 bg-blue-600/10 text-blue-600 dark:text-blue-400 py-2 text-xs font-semibold hover:bg-blue-600/20 transition cursor-pointer disabled:opacity-60"
             >
-              {isPushingGit ? '推送中...' : '保存并测试推送'}
+              {isPushingGit ? '同步推送中...' : '立即同步并推送'}
             </button>
           </div>
         </div>

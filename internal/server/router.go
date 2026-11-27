@@ -2,13 +2,13 @@
 package server
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -148,13 +148,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/devices/ping-all", s.handlePingAllDevices)
 	s.mux.HandleFunc("POST /api/devices/{id}/deploy", s.handleDeployDevice)
 
-	s.mux.HandleFunc("GET /api/system/updater", s.handleGetUpdaterStatus)
-	s.mux.HandleFunc("POST /api/system/updater/trigger", s.handleTriggerUpdate)
-	s.mux.HandleFunc("GET /api/system/updater/trigger", s.handleTriggerUpdate)
+	s.mux.HandleFunc("GET /api/system/git/status", s.handleGetGitStatus)
+	s.mux.HandleFunc("POST /api/system/git/push", s.handleTestGitPush)
 
 	s.mux.HandleFunc("GET /api/system/backups", s.handleListServerBackups)
 	s.mux.HandleFunc("POST /api/system/backup/create", s.handleCreateServerBackup)
+	s.mux.HandleFunc("DELETE /api/system/backups/{name}", s.handleDeleteServerBackup)
 	s.mux.HandleFunc("POST /api/system/restore/path", s.handleRestoreFromPath)
+
+	s.mux.HandleFunc("GET /api/system/updater", s.handleGetUpdaterStatus)
+	s.mux.HandleFunc("POST /api/system/updater/trigger", s.handleTriggerUpdate)
+	s.mux.HandleFunc("GET /api/system/updater/trigger", s.handleTriggerUpdate)
 
 	s.mux.HandleFunc("GET /api/system/log-level", s.handleGetLogLevel)
 	s.mux.HandleFunc("POST /api/system/log-level", s.handleSetLogLevel)
@@ -438,68 +442,56 @@ func (s *Server) handleTriggerUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListServerBackups(w http.ResponseWriter, r *http.Request) {
-	backupDir := filepath.Join(filepath.Dir(s.dbPath), "backups")
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			writeJSON(w, http.StatusOK, []any{})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if s.gitRepo == nil {
+		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
-
-	type BackupItem struct {
-		FileName  string `json:"file_name"`
-		Path      string `json:"path"`
-		SizeBytes int64  `json:"size_bytes"`
-		CreatedAt string `json:"created_at"`
-	}
-
-	var list []BackupItem
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		list = append(list, BackupItem{
-			FileName:  entry.Name(),
-			Path:      filepath.Join(backupDir, entry.Name()),
-			SizeBytes: info.Size(),
-			CreatedAt: info.ModTime().Format(time.RFC3339),
-		})
+	list, err := s.gitRepo.ListBackups()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 	writeJSON(w, http.StatusOK, list)
 }
 
 func (s *Server) handleCreateServerBackup(w http.ResponseWriter, r *http.Request) {
-	backupDir := filepath.Join(filepath.Dir(s.dbPath), "backups")
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot create backup dir: " + err.Error()})
+	if s.gitRepo == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git repo not initialized"})
 		return
 	}
-
 	dumpSQL, err := s.store.DumpSQL(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "dump error: " + err.Error()})
 		return
 	}
-
-	fileName := fmt.Sprintf("backup_%s.sql", time.Now().Format("20060102_150405"))
-	targetPath := filepath.Join(backupDir, fileName)
-
-	if err := os.WriteFile(targetPath, []byte(dumpSQL), 0644); err != nil {
+	entry, err := s.gitRepo.CreateManualBackup(dumpSQL)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write backup error: " + err.Error()})
 		return
 	}
+	go s.pushGitIfConfigured(context.Background())
+	writeJSON(w, http.StatusOK, map[string]string{"file_name": entry.FileName, "path": entry.Path})
+}
 
-	writeJSON(w, http.StatusOK, map[string]string{"file_name": fileName, "path": targetPath})
+func (s *Server) handleDeleteServerBackup(w http.ResponseWriter, r *http.Request) {
+	if s.gitRepo == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git repo not initialized"})
+		return
+	}
+	name := r.PathValue("name")
+	if err := s.gitRepo.DeleteBackup(name); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	go s.pushGitIfConfigured(context.Background())
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleRestoreFromPath(w http.ResponseWriter, r *http.Request) {
+	if s.gitRepo == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git repo not initialized"})
+		return
+	}
 	var req struct {
 		Path string `json:"path"`
 	}
@@ -508,7 +500,7 @@ func (s *Server) handleRestoreFromPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sqlBytes, err := os.ReadFile(req.Path)
+	sqlBytes, err := s.gitRepo.ReadBackup(req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot read backup file: " + err.Error()})
 		return
@@ -518,8 +510,57 @@ func (s *Server) handleRestoreFromPath(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "restore error: " + err.Error()})
 		return
 	}
-
+	s.syncGitStateAsync(false)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+}
+
+func (s *Server) handleGetGitStatus(w http.ResponseWriter, r *http.Request) {
+	if s.gitRepo == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"initialized": false})
+		return
+	}
+	checkRemote := r.URL.Query().Get("remote") == "1"
+	remoteURL := s.store.GetSetting(r.Context(), "git_remote_url", "")
+	branch := s.store.GetSetting(r.Context(), "git_branch", "main")
+	token := s.store.GetSetting(r.Context(), "git_token", "")
+	proxyURL := ""
+	if s.store.GetSetting(r.Context(), "git_use_proxy", "false") == "true" {
+		proxyURL = s.store.GetSetting(r.Context(), "github_proxy", "")
+	}
+	st := s.gitRepo.GetStatus(remoteURL, branch, token, proxyURL, checkRemote)
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) handleTestGitPush(w http.ResponseWriter, r *http.Request) {
+	if s.gitRepo == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git repo not initialized"})
+		return
+	}
+
+	// 同步前先确保当前最新 SQL 与已删方案已落盘提交
+	if sqlDump, err := s.store.DumpSQL(r.Context()); err == nil {
+		profiles, _ := s.store.ListProfiles(r.Context())
+		activeIDs := make([]string, len(profiles))
+		for i, p := range profiles {
+			activeIDs[i] = p.ID
+		}
+		_, _, _ = s.gitRepo.SyncDatabaseState(activeIDs, sqlDump, false)
+	}
+
+	remoteURL := s.store.GetSetting(r.Context(), "git_remote_url", "")
+	branch := s.store.GetSetting(r.Context(), "git_branch", "main")
+	token := s.store.GetSetting(r.Context(), "git_token", "")
+	proxyURL := ""
+	if s.store.GetSetting(r.Context(), "git_use_proxy", "false") == "true" {
+		proxyURL = s.store.GetSetting(r.Context(), "github_proxy", "")
+	}
+
+	if err := s.gitRepo.PushRemote(remoteURL, branch, token, proxyURL); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	st := s.gitRepo.GetStatus(remoteURL, branch, token, proxyURL, true)
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (s *Server) handleGetLogLevel(w http.ResponseWriter, r *http.Request) {
@@ -587,6 +628,8 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	for k, v := range req {
 		_ = s.store.SetSetting(r.Context(), k, v)
 	}
+
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -613,6 +656,7 @@ func (s *Server) handleSaveComponent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -622,6 +666,7 @@ func (s *Server) handleDeleteComponent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -635,6 +680,7 @@ func (s *Server) handleBatchDeleteComponents(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -661,6 +707,7 @@ func (s *Server) handleSaveModule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -670,6 +717,7 @@ func (s *Server) handleDeleteModule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -683,6 +731,7 @@ func (s *Server) handleBatchDeleteModules(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -719,6 +768,7 @@ func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -728,6 +778,7 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -741,6 +792,7 @@ func (s *Server) handleBatchDeleteProfiles(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -767,6 +819,7 @@ func (s *Server) handleSaveDevice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -776,6 +829,7 @@ func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -789,6 +843,7 @@ func (s *Server) handleBatchDeleteDevices(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.syncGitStateAsync(true)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -801,26 +856,6 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 func readJSON(r *http.Request, target any) error {
 	defer r.Body.Close()
 	return json.NewDecoder(io.LimitReader(r.Body, 10<<20)).Decode(target)
-}
-
-func (s *Server) handleTestGitPush(w http.ResponseWriter, r *http.Request) {
-	if s.gitRepo == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git repo not initialized"})
-		return
-	}
-	remoteURL := s.store.GetSetting(r.Context(), "git_remote_url", "")
-	branch := s.store.GetSetting(r.Context(), "git_branch", "main")
-	token := s.store.GetSetting(r.Context(), "git_token", "")
-	proxyURL := ""
-	if s.store.GetSetting(r.Context(), "git_use_proxy", "false") == "true" {
-		proxyURL = s.store.GetSetting(r.Context(), "github_proxy", "")
-	}
-
-	if err := s.gitRepo.PushRemote(remoteURL, branch, token, proxyURL); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed"})
 }
 
 const sessionCookieName = "singhub_session"
@@ -922,4 +957,49 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		Secure:   isHTTPS,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
+}
+
+func (s *Server) syncGitStateAsync(createAutoBackup bool) {
+	if s.gitRepo == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		sqlDump, err := s.store.DumpSQL(ctx)
+		if err != nil {
+			return
+		}
+		profiles, _ := s.store.ListProfiles(ctx)
+		activeIDs := make([]string, len(profiles))
+		for i, p := range profiles {
+			activeIDs[i] = p.ID
+		}
+
+		_, changed, err := s.gitRepo.SyncDatabaseState(activeIDs, sqlDump, createAutoBackup)
+		if err != nil || !changed {
+			return
+		}
+		s.pushGitIfConfigured(ctx)
+	}()
+}
+
+func (s *Server) pushGitIfConfigured(ctx context.Context) {
+	if s.gitRepo == nil {
+		return
+	}
+	remoteURL := strings.TrimSpace(s.store.GetSetting(ctx, "git_remote_url", ""))
+	if remoteURL == "" {
+		return
+	}
+	branch := s.store.GetSetting(ctx, "git_branch", "main")
+	token := s.store.GetSetting(ctx, "git_token", "")
+	proxyURL := ""
+	if s.store.GetSetting(ctx, "git_use_proxy", "false") == "true" {
+		proxyURL = s.store.GetSetting(ctx, "github_proxy", "")
+	}
+	if err := s.gitRepo.PushRemote(remoteURL, branch, token, proxyURL); err != nil {
+		slog.Warn("gitops remote push failed", "remote", remoteURL, "err", err)
+	}
 }

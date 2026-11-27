@@ -301,10 +301,17 @@ func (e *Engine) Assemble(ctx context.Context, profileID string) ([]byte, string
 	var commitHash string
 	if e.gitRepo != nil {
 		sqlDump, _ := e.store.DumpSQL(ctx)
-		commitHash, _ = e.gitRepo.CommitSnapshot(profileID, finalJSON, sqlDump)
+		profiles, _ := e.store.ListProfiles(ctx)
+		activeIDs := make([]string, len(profiles))
+		for i, p := range profiles {
+			activeIDs[i] = p.ID
+		}
+
+		var changed bool
+		commitHash, changed, _ = e.gitRepo.CommitProfileAndSync(profileID, finalJSON, activeIDs, sqlDump, true)
 
 		remoteURL := strings.TrimSpace(e.store.GetSetting(ctx, "git_remote_url", ""))
-		if remoteURL != "" {
+		if remoteURL != "" && changed {
 			branch := e.store.GetSetting(ctx, "git_branch", "main")
 			token := e.store.GetSetting(ctx, "git_token", "")
 			proxyURL := ""

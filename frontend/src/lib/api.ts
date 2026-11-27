@@ -11,6 +11,20 @@ import type {
   DeployResult
 } from './types';
 
+export interface GitStatus {
+  initialized: boolean;
+  local_head: string;
+  local_commit_msg: string;
+  local_commit_at: string;
+  remote_head: string;
+  last_pushed_head: string;
+  last_push_at: string;
+  last_push_error: string;
+  ahead_count: number;
+  dirty: boolean;
+  synced: boolean;
+}
+
 class ApiClient {
   private async request<T>(url: string, init?: RequestInit): Promise<T> {
     const res = await fetch(url, {
@@ -296,8 +310,16 @@ class ApiClient {
     return this.request<void>('/api/system/updater/trigger', { method: 'POST' });
   }
 
-  async testGitPush(): Promise<{ status: string }> {
-    return this.request<{ status: string }>('/api/system/git/push', { method: 'POST' });
+  async deleteServerBackup(name: string): Promise<void> {
+    return this.request<void>(`/api/system/backups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  }
+
+  async getGitStatus(checkRemote = false): Promise<GitStatus> {
+    return this.request<GitStatus>(`/api/system/git/status${checkRemote ? '?remote=1' : ''}`);
+  }
+
+  async testGitPush(): Promise<GitStatus> {
+    return this.request<GitStatus>('/api/system/git/push', { method: 'POST' });
   }
 
   async getAuthStatus(): Promise<{ enabled: boolean; authenticated: boolean }> {
